@@ -1,0 +1,14 @@
+import search from "lucide-static/icons/search.svg?raw";
+import home from "lucide-static/icons/house.svg?raw";
+import user from "lucide-static/icons/user.svg?raw";
+import bell from "lucide-static/icons/bell.svg?raw";
+import settings from "lucide-static/icons/settings.svg?raw";
+import menu from "lucide-static/icons/menu.svg?raw";
+import chevronRight from "lucide-static/icons/chevron-right.svg?raw";
+import plus from "lucide-static/icons/plus.svg?raw";
+import star from "lucide-static/icons/star.svg?raw";
+import heart from "lucide-static/icons/heart.svg?raw";
+import check from "lucide-static/icons/check.svg?raw";
+import close from "lucide-static/icons/x.svg?raw";
+import image from "lucide-static/icons/image.svg?raw";
+export const iconAssets={search,home,user,bell,settings,menu,"chevron-right":chevronRight,plus,star,heart,check,close,image};
