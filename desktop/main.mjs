@@ -7,7 +7,6 @@ import {
   dialog,
   shell,
   clipboard,
-  net,
   session,
   nativeImage,
 } from "electron";
@@ -20,6 +19,7 @@ import updaterPackage from "electron-updater";
 import { createStorage, atomicJson } from "./storage.mjs";
 import { createVisionService } from "./vision-service.mjs";
 import { createHotUpdater } from "./hot-update.mjs";
+import { electronFetch } from "./electron-fetch.mjs";
 
 const directory = fileURLToPath(new URL(".", import.meta.url));
 const release = JSON.parse(
@@ -102,7 +102,7 @@ async function start() {
     bundledRoot,
     userDataDir: userData,
     publicKeyPath: join(directory, "update-public-key.pem"),
-    fetchImpl: (url, options) => net.fetch(url, options),
+    fetchImpl: electronFetch,
     onState: (state) => send("update:state", state),
   });
   const autoUpdater = updaterPackage.autoUpdater;
@@ -416,11 +416,12 @@ async function start() {
       }
     }
   }
-  ipcMain.on("renderer:ready", async (event) => {
+  ipcMain.on("renderer:ready", async (event, version) => {
     try {
       trusted(event);
+      if (version !== hot.getState().currentVersion) return;
+      await hot.confirmBoot(version);
       clearTimeout(bootTimer);
-      await hot.confirmBoot(hot.getState().currentVersion);
       rendererCrashed = false;
       rendererIsReady = true;
       await deliverOpen();

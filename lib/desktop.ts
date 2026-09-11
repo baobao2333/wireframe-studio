@@ -83,7 +83,7 @@ export interface DesktopApi {
   updateApply(): Promise<void>;
   nativeUpdateDownload(): Promise<void>;
   nativeUpdateApply(): Promise<void>;
-  rendererReady(): void;
+  rendererReady(version: string): void;
   closeReady(): void;
   onCommand(listener: (command: string) => void): () => void;
   onProject(listener: (file: OpenedProject) => void): () => void;

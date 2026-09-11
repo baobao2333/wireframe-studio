@@ -706,7 +706,7 @@ export default function GrapesStudio() {
           setReady(true);
           refresh();
           requestAnimationFrame(fit);
-          desktop?.rendererReady();
+          desktop?.rendererReady(__WIREFRAME_UI_VERSION__);
         } catch (e) {
           setSaved("读取失败");
           toast.error("项目读取失败，未覆盖原有存储", {

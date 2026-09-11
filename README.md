@@ -53,9 +53,10 @@ npm run package
 发布者同步 `package.json` 和 `desktop/release.json` 后构建安装器，再生成签名清单：
 
 ```sh
-node scripts/make-hot-update.mjs --version 1.0.2 --min-app-version 1.0.1 --tag v1.0.2 --output release --private-key .release-secrets/update-private-key.pem --native-path release/Wireframe-Studio-Setup-1.0.2-x64.exe --native-version 1.0.2
+node scripts/make-hot-update.mjs --version 1.0.4 --min-app-version 1.0.3 --tag v1.0.4 --output release --private-key .release-secrets/update-private-key.pem --native-path release/Wireframe-Studio-Setup-1.0.4-x64.exe --native-version 1.0.4
+node scripts/verify-release.mjs
 ```
 
-每个 Release 上传安装器、`.blockmap`、`latest.yml`、`renderer-<version>.zip` 和 `renderer-update.json`。私钥须单独备份。轮换公钥需要新桌面运行时，不能静默替换已有安装的信任根。
+每个 Release 上传安装器、`.blockmap`、`latest.yml`、`renderer-<version>.zip`、`renderer-update.json` 和 `SHA256SUMS.txt`。私钥须单独备份。轮换公钥需要新桌面运行时，不能静默替换已有安装的信任根。
 
 源码公开可查，暂未授予额外开源许可。依赖与 vendored 资源保留各自许可证。Electron 和 Chromium 的第三方许可随安装器提供。

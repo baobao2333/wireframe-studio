@@ -29,7 +29,7 @@ contextBridge.exposeInMainWorld(
     updateApply: () => call("update:apply"),
     nativeUpdateDownload: () => call("native-update:download"),
     nativeUpdateApply: () => call("native-update:apply"),
-    rendererReady: () => ipcRenderer.send("renderer:ready"),
+    rendererReady: (version) => ipcRenderer.send("renderer:ready", version),
     closeReady: () => ipcRenderer.send("renderer:close-ready"),
     onCommand: (callback) => listen("app:command", callback),
     onUpdate: (callback) => listen("update:state", callback),
