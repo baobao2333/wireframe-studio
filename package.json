@@ -1,6 +1,6 @@
 {
   "name": "wireframe-studio",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "private": true,
   "description": "Desktop wireframe editor with local Codex vision, reusable components and verified updates",
   "author": "baobao2333",
@@ -20,10 +20,12 @@
     "prebuild": "node scripts/prepare-ocr.mjs",
     "build": "vite build --config vite.desktop.config.ts",
     "package": "npm run build && node scripts/package-desktop.mjs",
+    "package:signed": "npm run build && node scripts/package-desktop.mjs --signed",
     "start": "node scripts/run-desktop.mjs",
     "test": "node scripts/test-core.mjs && node scripts/test-editor.mjs && node scripts/test-hot-update.mjs && node scripts/test-desktop-services.mjs",
     "pretest:desktop": "node scripts/prepare-ocr.mjs",
     "test:desktop": "node scripts/test-ocr-worker.mjs && node scripts/test-electron-fetch.mjs",
+    "test:signature": "node scripts/test-windows-signature.mjs",
     "lint": "eslint .",
     "db:generate": "drizzle-kit generate"
   },
@@ -82,6 +84,7 @@
     "eslint": "9.39.4",
     "eslint-config-next": "16.2.6",
     "js-yaml": "4.1.1",
+    "pe-library": "0.4.1",
     "react-server-dom-webpack": "19.2.6",
     "sharp": "0.34.5",
     "tailwindcss": "4.2.1",

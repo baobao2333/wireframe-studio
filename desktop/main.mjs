@@ -12,16 +12,16 @@ import {
 } from "electron";
 import { readFile, writeFile, mkdir, stat } from "node:fs/promises";
 import { join, resolve, extname, sep, basename } from "node:path";
-import { createHash } from "node:crypto";
-import { createReadStream } from "node:fs";
 import { fileURLToPath } from "node:url";
 import updaterPackage from "electron-updater";
 import { createStorage, atomicJson } from "./storage.mjs";
 import { createVisionService } from "./vision-service.mjs";
 import { createHotUpdater } from "./hot-update.mjs";
 import { electronFetch } from "./electron-fetch.mjs";
+import { verifyWindowsInstaller, verifyWindowsSignature } from "./windows-signature.mjs";
 
 const directory = fileURLToPath(new URL(".", import.meta.url));
+const publisher = JSON.parse(await readFile(join(directory, "publisher.json"), "utf8"));
 const release = JSON.parse(
   await readFile(join(directory, "release.json"), "utf8"),
 );
@@ -83,19 +83,16 @@ async function start() {
   let nativeUpdate = { status: "idle" },
     nativeExpected,
     nativeDownloaded;
-  async function verifyInstaller(file, expected) {
-    const info = await stat(file);
-    if (info.size !== expected.size) throw Error("安装包大小校验失败");
-    const hash = createHash("sha256");
-    for await (const chunk of createReadStream(file)) hash.update(chunk);
-    if (hash.digest("hex") !== expected.sha256)
-      throw Error("安装包完整性校验失败");
-  }
   const send = (channel, value) => {
     if (window && !window.isDestroyed())
       window.webContents.send(channel, value);
   };
   await app.whenReady();
+  const publisherStatus = app.isPackaged
+    ? verifyWindowsSignature(app.getPath("exe"))
+        .then(() => ({ name: publisher.name, status: "self-signed" }))
+        .catch((error) => ({ name: publisher.name, status: "unverified", error: error.message }))
+    : Promise.resolve({ name: publisher.name, status: "development" });
   const hot = await createHotUpdater({
     appVersion: release.appVersion,
     bundledVersion: release.rendererVersion,
@@ -108,6 +105,17 @@ async function start() {
   const autoUpdater = updaterPackage.autoUpdater;
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
+  autoUpdater.disableWebInstaller = true;
+  autoUpdater.verifyUpdateCodeSignature = async (publishers, file) => {
+    try {
+      if (!nativeExpected || !publishers.includes(publisher.subject))
+        throw Error("安装包缺少已验签的发布信息");
+      await verifyWindowsInstaller(file, nativeExpected);
+      return null;
+    } catch (error) {
+      return error.message;
+    }
+  };
   autoUpdater.setFeedURL({
     provider: "github",
     owner: release.repository.split("/")[0],
@@ -124,7 +132,7 @@ async function start() {
       const expected = nativeExpected;
       if (!expected || expected.version !== info.version)
         throw Error("安装包版本未通过签名清单校验");
-      await verifyInstaller(info.downloadedFile, expected);
+      await verifyWindowsInstaller(info.downloadedFile, expected);
       nativeDownloaded = info.downloadedFile;
       nativeUpdate = { status: "ready", version: info.version };
     } catch (e) {
@@ -221,6 +229,7 @@ async function start() {
     codex: await vision.status(),
     updates: hot.getState(),
     nativeUpdate,
+    publisher: await publisherStatus,
     repository: repoUrl,
     platform: process.platform,
   }));
@@ -326,7 +335,15 @@ async function start() {
   });
   handle("vision:get", (id) => vision.get(id));
   handle("vision:cancel", (id) => vision.cancel(id));
-  handle("update:check", () => hot.check());
+  handle("update:check", async () => {
+    const next = await hot.check();
+    if (nativeExpected && next.native?.sha256 !== nativeExpected.sha256) {
+      nativeExpected = null;
+      nativeDownloaded = null;
+      nativeUpdate = { status: "idle" };
+    }
+    return next;
+  });
   handle("update:download", () => hot.download());
   let recovering = false;
   async function recoverRenderer(reason) {
@@ -399,8 +416,10 @@ async function start() {
   handle("native-update:apply", async () => {
     if (nativeUpdate.status !== "ready" || !nativeDownloaded || !nativeExpected)
       throw Error("安装包尚未就绪");
+    if (hot.getState().native?.sha256 !== nativeExpected.sha256)
+      throw Error("发布版本已变化，请重新下载运行时");
     if (vision.isBusy()) throw Error("请先完成或取消图片识别");
-    await verifyInstaller(nativeDownloaded, nativeExpected);
+    await verifyWindowsInstaller(nativeDownloaded, nativeExpected);
     await storage.flush();
     await storage.backup();
     await vision.dispose();

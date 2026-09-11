@@ -31,6 +31,11 @@ export type DesktopInfo = {
   nativeUpdate: NativeUpdateState;
   repository: string;
   platform: string;
+  publisher?: {
+    name: string;
+    status: "self-signed" | "unverified" | "development";
+    error?: string;
+  };
 };
 export type VisionJob = {
   status: string;

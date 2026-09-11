@@ -1,3 +1,7 @@
+// eslint-disable-next-line @typescript-eslint/no-require-imports -- This build configuration is CommonJS.
+const publisher = require("./desktop/publisher.json");
+const signedRelease = process.env.WIREFRAME_SIGN_RELEASE === "1";
+
 module.exports = {
   appId: "com.baobao2333.wireframe-studio",
   productName: "Wireframe Studio",
@@ -5,9 +9,11 @@ module.exports = {
   directories: { app: "build/desktop-app", buildResources: "assets", output: "release" },
   asar: true,
   npmRebuild: false,
+  forceCodeSigning: signedRelease,
   files: [
     "desktop/*.{mjs,cjs,json}",
     "desktop/update-public-key.pem",
+    "desktop/verify-signature.ps1",
     "server/vision-schema.mjs",
     "renderer/**/*",
     "package.json",
@@ -24,7 +30,15 @@ module.exports = {
     { from: "server/vision-instructions.txt", to: "vision-instructions.txt" },
     { from: "assets/app.ico", to: "app.ico" },
   ],
-  win: { target: [{ target: "nsis", arch: ["x64"] }], icon: "app.ico" },
+  win: {
+    target: [{ target: "nsis", arch: ["x64"] }],
+    icon: "app.ico",
+    signtoolOptions: {
+      publisherName: publisher.subject,
+      signingHashAlgorithms: ["sha256"],
+      ...(signedRelease ? { certificateSha1: publisher.certificateSha1 } : {}),
+    },
+  },
   nsis: {
     oneClick: false,
     perMachine: false,

@@ -76,7 +76,8 @@ export function DesktopSettings({
     }
   }
   const native = info?.nativeUpdate,
-    nativeAvailable = state?.native && state.native.version !== info?.version;
+    nativeAvailable = state?.native && state.native.version !== info?.version,
+    nativeReady = native?.status === "ready" && native.version === state?.native?.version;
   return (
     <Dialog
       open={open}
@@ -103,6 +104,14 @@ export function DesktopSettings({
             </dd>
           </div>
           <div>
+            <dt>签名发布者</dt>
+            <dd>
+              {!info ? "读取中" : !info.publisher ? "旧版运行时未提供" :
+                info.publisher.status === "self-signed" ? `${info.publisher.name} · 自签名` :
+                info.publisher.status === "development" ? "开发构建" : "未通过签名核对"}
+            </dd>
+          </div>
+          <div>
             <dt>工程存储</dt>
             <dd>{info?.dataPath || "读取中"}</dd>
           </div>
@@ -112,6 +121,7 @@ export function DesktopSettings({
           </div>
       </dl>
       {info?.codex.error&&<p className="update-warning">{info.codex.error}</p>}
+      {info?.publisher?.error&&<p className="update-warning">{info.publisher.error}</p>}
         <section className="update-section">
           <h3>
             <ShieldCheck size={16} />
@@ -174,7 +184,7 @@ export function DesktopSettings({
           <section className="update-section">
             <h3>桌面运行时 {state!.native!.version}</h3>
             <p>
-              {native?.status === "ready"
+              {nativeReady
                 ? "安装包已通过完整性校验"
                 : native?.status === "downloading"
                   ? `正在下载 · ${Math.round(native.percent || 0)}%`
@@ -186,19 +196,19 @@ export function DesktopSettings({
               disabled={busy || native?.status === "downloading"}
               onClick={() =>
                 void run(async () => {
-                  if (native?.status === "ready") {
+                  if (nativeReady) {
                     await beforeApply();
                     await desktop!.nativeUpdateApply();
                   } else await desktop!.nativeUpdateDownload();
                 })
               }
             >
-              {native?.status === "ready" ? (
+              {nativeReady ? (
                 <RotateCw size={16} />
               ) : (
                 <Download size={16} />
               )}{" "}
-              {native?.status === "ready"
+              {nativeReady
                 ? "保存并安装运行时"
                 : "下载运行时更新"}
             </button>
