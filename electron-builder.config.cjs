@@ -19,6 +19,7 @@ module.exports = {
     "!node_modules/**/*.{pem,key,p12,pfx}",
   ],
   extraResources: [
+    { from: "build/THIRD-PARTY-NOTICES.txt", to: "THIRD-PARTY-NOTICES.txt" },
     { from: "public/ocr", to: "ocr", filter: ["**/*"] },
     { from: "server/vision-instructions.txt", to: "vision-instructions.txt" },
     { from: "assets/app.ico", to: "app.ico" },

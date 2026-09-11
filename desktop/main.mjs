@@ -169,8 +169,12 @@ async function start() {
       return new Response(data, {
         headers: {
           "Content-Type": types[extname(file)] || "application/octet-stream",
-          "Content-Security-Policy":
-            "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' data: blob:; worker-src 'self' blob:; frame-src 'self' about:; object-src 'none'; base-uri 'self'; form-action 'none'",
+          "Content-Security-Policy": [
+            "/ocr/shape-worker.js",
+            "/ocr/worker.min.js",
+          ].includes(pathname)
+            ? "default-src 'none'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; connect-src 'self' data: blob:; worker-src 'self';"
+            : "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' data: blob:; worker-src 'self' blob:; frame-src 'self' about:; object-src 'none'; base-uri 'self'; form-action 'none'",
           "Cache-Control": "no-cache",
         },
       });
@@ -204,6 +208,7 @@ async function start() {
     if (size > 32 * 1024 * 1024) throw Error("工程文件超过 32 MB");
     const content = await readFile(path, "utf8");
     JSON.parse(content);
+    await storage.backup();
     pendingAcceptance.add(path);
     knownFiles.add(path);
     return { name: basename(path), content, path };
@@ -229,9 +234,10 @@ async function start() {
     });
     return result.canceled ? null : openProjectPath(result.filePaths[0]);
   });
-  handle("project:accept", (path) => {
+  handle("project:accept", async (path) => {
     if (path !== null && !pendingAcceptance.has(path))
       throw Error("此工程尚未通过打开操作授权");
+    if (path === null) await storage.backup();
     currentProjectPath = path;
     pendingAcceptance.clear();
   });
@@ -290,6 +296,34 @@ async function start() {
     clipboard.writeText(text);
   });
   handle("vision:start", (input) => vision.start(input));
+  handle("image:open", async () => {
+    const result = await dialog.showOpenDialog(window, {
+      title: "选择界面截图",
+      properties: ["openFile"],
+      filters: [
+        { name: "界面截图", extensions: ["png", "jpg", "jpeg", "webp"] },
+      ],
+    });
+    if (result.canceled) return null;
+    const path = result.filePaths[0];
+    if ((await stat(path)).size > 20 * 1024 * 1024)
+      throw Error("图片不能超过 20 MB");
+    const bytes = await readFile(path);
+    const png = bytes
+      .subarray(0, 8)
+      .equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+    const jpeg = bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255;
+    const webp =
+      bytes.toString("ascii", 0, 4) === "RIFF" &&
+      bytes.toString("ascii", 8, 12) === "WEBP";
+    if (!png && !jpeg && !webp)
+      throw Error("请选择有效的 PNG、JPG 或 WebP 图片");
+    return {
+      name: basename(path),
+      type: png ? "image/png" : jpeg ? "image/jpeg" : "image/webp",
+      data: Uint8Array.from(bytes).buffer,
+    };
+  });
   handle("vision:get", (id) => vision.get(id));
   handle("vision:cancel", (id) => vision.cancel(id));
   handle("update:check", () => hot.check());

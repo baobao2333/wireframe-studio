@@ -54,3 +54,4 @@ next-env.d.ts
 /.wireframe-runtime/
 /exports/
 /public/ocr/
+/build/THIRD-PARTY-NOTICES.txt

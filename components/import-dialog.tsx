@@ -19,6 +19,7 @@ import { readImage, parseImage } from "@/lib/image-parser";
 import type { Project } from "@/lib/wireframe";
 import { modelImage } from "@/lib/model-client";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { desktop } from "@/lib/desktop";
 
 export function ImportDialog({
   open,
@@ -28,7 +29,7 @@ export function ImportDialog({
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  onImport: (p: Project) => void;
+  onImport: (p: Project) => boolean | void | Promise<boolean | void>;
   initialImage?: Project["reference"];
 }) {
   const [image, setImage] = useState<{
@@ -101,6 +102,19 @@ export function ImportDialog({
       setBusy(false);
     }
   }
+  async function chooseImage() {
+    if (!desktop) {
+      fileRef.current?.click();
+      return;
+    }
+    try {
+      const file = await desktop.openImage();
+      if (file)
+        await select(new File([file.data], file.name, { type: file.type }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
   const close = (v: boolean) => {
     if (!v) {
       controller.current?.abort();
@@ -151,7 +165,7 @@ export function ImportDialog({
         <button
           className={`image-drop ${image ? "has-image" : ""}`}
           disabled={busy}
-          onClick={() => fileRef.current?.click()}
+          onClick={() => void chooseImage()}
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => {
             e.preventDefault();
@@ -262,8 +276,8 @@ export function ImportDialog({
           {result ? (
             <button
               className="command primary"
-              onClick={() => {
-                onImport(result);
+              onClick={async () => {
+                if ((await onImport(result)) === false) return;
                 setResult(null);
                 setImage(null);
               }}

@@ -48,6 +48,11 @@ export type VisionJob = {
 export type OpenedProject = { name: string; content: string; path: string };
 export interface DesktopApi {
   info(): Promise<DesktopInfo>;
+  openImage(): Promise<{
+    name: string;
+    type: string;
+    data: ArrayBuffer;
+  } | null>;
   storageGet(key: string): Promise<unknown>;
   storageSet(key: string, value: unknown): Promise<void>;
   openProject(): Promise<{

@@ -86,7 +86,7 @@ export function studioFile(editor: Editor, meta: Meta): StudioFile {
 export function fixedCanvasFile(file: StudioFile): StudioFile {
   if ((file.meta.engineRevision || 0) >= 2) return file;
   // Early editor builds unintentionally emitted the custom device as a breakpoint.
-  const styles = file.editor.styles?.map((rule:CssRuleJSON) =>
+  const styles = file.editor.styles?.map((rule: CssRuleJSON) =>
     rule.mediaText === "(max-width: 1120px)" && rule.atRuleType === "media"
       ? { ...rule, mediaText: "", atRuleType: "" }
       : rule,
@@ -263,41 +263,64 @@ export async function buildExport(
       filename: name + ".html",
     };
   const { toSvg, toPng } = await import("html-to-image");
-  const el = editor.getWrapper()!.getEl()!;
-  const opts = {
-    width: meta.width,
-    height: meta.height,
-    backgroundColor: "#ffffff",
-    pixelRatio: Math.min(2, 6000 / meta.width, 6000 / meta.height),
-    skipFonts: true,
-  };
-  const svgUrl = await toSvg(el, opts),
-    svg = await (await fetch(svgUrl)).text();
-  if (format === "svg")
-    return {
-      blob: new Blob([svg], { type: "image/svg+xml" }),
-      filename: name + ".svg",
+  // Render exported markup without GrapesJS selection and hover styles.
+  const snapshot = document.createElement("iframe");
+  snapshot.setAttribute("sandbox", "allow-same-origin");
+  snapshot.setAttribute("aria-hidden", "true");
+  snapshot.style.cssText = `position:fixed;left:-10000px;top:0;width:${meta.width}px;height:${meta.height}px;border:0;pointer-events:none`;
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(Error("导出画面载入超时")), 15000);
+      snapshot.onload = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      snapshot.onerror = () => {
+        clearTimeout(timer);
+        reject(Error("导出画面载入失败"));
+      };
+      snapshot.srcdoc = exportHtml(editor, meta);
+      document.body.appendChild(snapshot);
+    });
+    const el = snapshot.contentDocument!.body;
+    await snapshot.contentDocument!.fonts.ready;
+    const opts = {
+      width: meta.width,
+      height: meta.height,
+      backgroundColor: "#ffffff",
+      pixelRatio: Math.min(2, 6000 / meta.width, 6000 / meta.height),
+      skipFonts: true,
     };
-  const png = await (await fetch(await toPng(el, opts))).blob();
-  if (format === "png") return { blob: png, filename: name + ".png" };
-  const zip = zipSync(
-    {
-      "project.json": strToU8(file),
-      "design-spec.json": strToU8(
-        JSON.stringify(specifications(editor, meta), null, 2),
-      ),
-      "index.html": strToU8(exportHtml(editor, meta)),
-      "Wireframe.tsx": strToU8(exportReact(editor)),
-      "handoff.md": strToU8(handoffGrapes(editor, meta)),
-      "wireframe.svg": strToU8(svg),
-      "wireframe.png": new Uint8Array(await png.arrayBuffer()),
-    },
-    { level: 6 },
-  );
-  return {
-    blob: new Blob([zip as Uint8Array<ArrayBuffer>], {
-      type: "application/zip",
-    }),
-    filename: name + "-codex.zip",
-  };
+    const svgUrl = await toSvg(el, opts),
+      svg = await (await fetch(svgUrl)).text();
+    if (format === "svg")
+      return {
+        blob: new Blob([svg], { type: "image/svg+xml" }),
+        filename: name + ".svg",
+      };
+    const png = await (await fetch(await toPng(el, opts))).blob();
+    if (format === "png") return { blob: png, filename: name + ".png" };
+    const zip = zipSync(
+      {
+        "project.json": strToU8(file),
+        "design-spec.json": strToU8(
+          JSON.stringify(specifications(editor, meta), null, 2),
+        ),
+        "index.html": strToU8(exportHtml(editor, meta)),
+        "Wireframe.tsx": strToU8(exportReact(editor)),
+        "handoff.md": strToU8(handoffGrapes(editor, meta)),
+        "wireframe.svg": strToU8(svg),
+        "wireframe.png": new Uint8Array(await png.arrayBuffer()),
+      },
+      { level: 6 },
+    );
+    return {
+      blob: new Blob([zip as Uint8Array<ArrayBuffer>], {
+        type: "application/zip",
+      }),
+      filename: name + "-codex.zip",
+    };
+  } finally {
+    snapshot.remove();
+  }
 }

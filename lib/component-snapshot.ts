@@ -1,5 +1,11 @@
 import type { Component, ComponentDefinition } from "grapesjs";
 
+export function normalizeToolbarPointer(event: {clientX: number; clientY: number}, zoom: number) {
+  const scale = zoom / 100;
+  event.clientX /= scale;
+  event.clientY /= scale;
+}
+
 const snapshotProperties =
   `position left top width height min-width min-height max-width max-height box-sizing display visibility overflow z-index
   margin-top margin-right margin-bottom margin-left padding-top padding-right padding-bottom padding-left

@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { stageDesktop } from "./stage-desktop.mjs";
+import { prepareNotices } from "./prepare-notices.mjs";
 
 const projectRoot = path.resolve(import.meta.dirname, "..");
 const { values } = parseArgs({ options: { help: { type: "boolean", short: "h" } } });
@@ -12,6 +13,7 @@ if (values.help) {
   try {
     if (process.platform !== "win32") throw new Error("This release entrypoint must run on Windows.");
     const builder = createRequire(import.meta.url).resolve("electron-builder/cli.js");
+    await prepareNotices();
     const staged = await stageDesktop();
     console.log(`Building Wireframe Studio ${staged.version} from ${staged.appDir}`);
     await new Promise((resolve, reject) => {

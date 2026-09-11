@@ -25,6 +25,7 @@ const visit = node => {
 spec.components.forEach(visit);
 assert.ok(styled > 0,"Exported components must have measured styles and bounds.");
 const html = strFromU8(files["index.html"]);
+assert.doesNotMatch(strFromU8(files["wireframe.svg"]),/gjs-selected|gjs-hovered/,"Export must not contain editor selection or hover classes.");
 assert.equal((html.match(/<body\b/g)||[]).length,1);
 const tsx = strFromU8(files["Wireframe.tsx"]);
 assert.match(tsx,/<main\b/);

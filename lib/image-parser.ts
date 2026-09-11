@@ -1,17 +1,5 @@
 import type { Worker as OCRWorker } from "tesseract.js";
 import { blankProject, makeNode, type Project, type WNode } from "./wireframe";
-type CV = typeof import("@techstark/opencv-js");
-let cvPromise: Promise<CV> | null = null;
-function loadCV(): Promise<CV> {
-  if (cvPromise) return cvPromise;
-  cvPromise = new Promise<CV>((resolve,reject) => {
-    const script=document.createElement("script");script.src="/ocr/opencv.js";
-    script.onerror=()=>reject(new Error("图形解析引擎加载失败，请检查网络后重试"));
-    script.onload=async()=>{try{const cv=await (window as unknown as {cv:CV|Promise<CV>}).cv;if(!cv?.Mat)throw Error("OpenCV 未完成初始化");resolve(cv);}catch(e){reject(e);}};
-    document.head.appendChild(script);
-  }).catch(e=>{cvPromise=null;throw e;});
-  return cvPromise;
-}
 export async function readImage(file: File): Promise<{src:string;width:number;height:number;name:string}> {
   if(!["image/png","image/jpeg","image/webp"].includes(file.type))throw Error("请选择 PNG、JPG 或 WebP 图片");
   if(file.size>20*1024*1024)throw Error("图片不能超过 20 MB");
@@ -22,33 +10,38 @@ export async function readImage(file: File): Promise<{src:string;width:number;he
 }
 type Box={x:number;y:number;w:number;h:number};
 const contains=(a:Box,b:Box,pad=0)=>b.x>=a.x-pad&&b.y>=a.y-pad&&b.x+b.w<=a.x+a.w+pad&&b.y+b.h<=a.y+a.h+pad;
-function detectShapes(cv:CV,canvas:HTMLCanvasElement): Box[] {
-  const src=cv.imread(canvas),gray=new cv.Mat(),edges=new cv.Mat(),contours=new cv.MatVector(),hierarchy=new cv.Mat();
-  try { cv.cvtColor(src,gray,cv.COLOR_RGBA2GRAY);
-    const boxes:Box[]=[];
-    for(const mode of ["edge","filled"]){
-      if(mode==="edge")cv.Canny(gray,edges,30,100,3,false);else cv.threshold(gray,edges,235,255,cv.THRESH_BINARY_INV);
-      cv.findContours(edges,contours,hierarchy,cv.RETR_LIST,cv.CHAIN_APPROX_SIMPLE);
-      for(let i=0;i<contours.size();i++){const contour=contours.get(i);try{const r=cv.boundingRect(contour);const area=r.width*r.height,coverage=Math.abs(cv.contourArea(contour))/area;const line=r.width>canvas.width*.12&&r.height<=4;const rect=area>400&&coverage>.72&&r.width>28&&r.height>14;
-      if((line||rect)&&area<canvas.width*canvas.height*.92)boxes.push({x:r.x,y:r.y,w:r.width,h:r.height});
-      }finally{contour.delete();}}
-    }
-    const unique:Box[]=[];boxes.sort((a,b)=>b.w*b.h-a.w*a.h).forEach(b=>{if(!unique.some(a=>Math.abs(a.x-b.x)<=5&&Math.abs(a.y-b.y)<=5&&Math.abs(a.w-b.w)<=10&&Math.abs(a.h-b.h)<=10))unique.push(b);});
-    return unique.slice(0,250);
-  }finally{src.delete();gray.delete();edges.delete();contours.delete();hierarchy.delete();}
+function detectShapes(imageData:ImageData,signal:AbortSignal,onReady:()=>void):Promise<Box[]> {
+  return new Promise((resolve,reject)=>{
+    if(signal.aborted){reject(signal.reason);return;}
+    const worker=new Worker("/ocr/shape-worker.js",{name:"wireframe-shape-detection"});let settled=false;
+    const finish=(error:Error|null,boxes?:Box[])=>{if(settled)return;settled=true;signal.removeEventListener("abort",abort);worker.onmessage=null;worker.onerror=null;worker.onmessageerror=null;worker.terminate();if(error)reject(error);else resolve(boxes!);};
+    const abort=()=>finish(signal.reason instanceof Error?signal.reason:new Error("已取消解析"));
+    signal.addEventListener("abort",abort,{once:true});
+    worker.onerror=event=>{event.preventDefault();finish(new Error(event.message||"图形解析工作线程加载失败"));};
+    worker.onmessageerror=()=>finish(new Error("图形解析结果无法读取"));
+    worker.onmessage=({data})=>{
+      if(data?.type==="ready"){onReady();return;}
+      if(data?.type==="error"){finish(new Error(typeof data.error==="string"?data.error:"图形解析失败"));return;}
+      if(data?.type!=="result"||!Array.isArray(data.boxes)||data.boxes.length>250||!data.boxes.every((b:Box)=>b&&[b.x,b.y,b.w,b.h].every(Number.isInteger)&&b.x>=0&&b.y>=0&&b.w>0&&b.h>0&&b.x+b.w<=imageData.width&&b.y+b.h<=imageData.height)){finish(new Error("图形解析结果格式无效"));return;}
+      finish(null,data.boxes);
+    };
+    const pixels=imageData.data.buffer as ArrayBuffer;
+    try{worker.postMessage({width:imageData.width,height:imageData.height,pixels},[pixels]);}catch(error){finish(error instanceof Error?error:new Error(String(error)));}
+  });
 }
 export async function parseImage(image:{src:string;width:number;height:number;name:string}, options:{width:number;language:"eng"|"chi_sim+eng";signal:AbortSignal;onProgress:(p:number,label:string)=>void}):Promise<Project> {
   const { createWorker, PSM } = await import("tesseract.js");
-  const {signal,onProgress}=options;let worker:OCRWorker|undefined;let timer:ReturnType<typeof setTimeout>|undefined;let fatalReject:(e:Error)=>void=()=>{};let active=true;
+  const {signal,onProgress}=options;let worker:OCRWorker|undefined;let timer:ReturnType<typeof setTimeout>|undefined;let fatalReject:(e:Error)=>void=()=>{};let active=true;const shapeControl=new AbortController();
   const fatal=new Promise<never>((_,reject)=>{fatalReject=reject;});
-  const abort=()=>{void worker?.terminate();fatalReject(new Error("已取消解析"));};signal.addEventListener("abort",abort,{once:true});
-  try { if(signal.aborted)throw Error("已取消解析");timer=setTimeout(()=>{void worker?.terminate();fatalReject(new Error("解析超过 3 分钟，请裁剪图片后重试"));},180000);
-    onProgress(2,"加载本地图形解析引擎");const cv=await Promise.race([loadCV(),fatal]);
-    const img=new Image();img.src=image.src;await img.decode();const canvas=document.createElement("canvas");canvas.width=image.width;canvas.height=image.height;const ctx=canvas.getContext("2d");if(!ctx)throw Error("无法创建解析画布");ctx.drawImage(img,0,0);
-    onProgress(12,"识别容器和图形边界");const boxes=detectShapes(cv,canvas);await new Promise(r=>requestAnimationFrame(r));
+  const abort=()=>{const error=new Error("已取消解析");shapeControl.abort(error);void worker?.terminate();fatalReject(error);};signal.addEventListener("abort",abort,{once:true});
+  try { if(signal.aborted)throw Error("已取消解析");timer=setTimeout(()=>{const error=new Error("解析超过 3 分钟，请裁剪图片后重试");shapeControl.abort(error);void worker?.terminate();fatalReject(error);},180000);
+    onProgress(2,"加载本地图形解析引擎");
+    const img=new Image();img.src=image.src;await Promise.race([img.decode(),fatal]);const canvas=document.createElement("canvas");canvas.width=image.width;canvas.height=image.height;const ctx=canvas.getContext("2d");if(!ctx)throw Error("无法创建解析画布");ctx.drawImage(img,0,0);
+    const pixels=ctx.getImageData(0,0,canvas.width,canvas.height);
+    const boxes=await Promise.race([detectShapes(pixels,shapeControl.signal,()=>onProgress(12,"识别容器和图形边界")),fatal]);await Promise.race([new Promise(r=>requestAnimationFrame(r)),fatal]);
     const init=createWorker(options.language,1,{workerPath:"/ocr/worker.min.js",corePath:"/ocr/core",langPath:"/ocr/lang",workerBlobURL:false,logger:m=>onProgress(m.status==="recognizing text"?35+m.progress*55:18+m.progress*15,m.status==="recognizing text"?"识别文字和位置":"加载本地文字识别模型"),errorHandler:e=>fatalReject(new Error(`OCR 失败：${String(e)}`))});
     void init.then(w=>{if(signal.aborted||!active)void w.terminate();},()=>{});worker=await Promise.race([init,fatal]);
-    await worker.setParameters({tessedit_pageseg_mode:PSM.SPARSE_TEXT,preserve_interword_spaces:"1"});
+    await Promise.race([worker.setParameters({tessedit_pageseg_mode:PSM.SPARSE_TEXT,preserve_interword_spaces:"1"}),fatal]);
     const {data}=await Promise.race([worker.recognize(canvas,{}, {blocks:true}),fatal]);
     if(!data.blocks&&!boxes.length)throw Error("未识别到文字或图形边界，请换一张清晰的界面截图");
     const scale=options.width/image.width;
@@ -59,7 +52,7 @@ export async function parseImage(image:{src:string;width:number;height:number;na
       const pixels=ctx.getImageData(b.x,b.y,b.w,b.h).data;let sum=0;for(let i=0;i<pixels.length;i+=16)sum+=(pixels[i]+pixels[i+1]+pixels[i+2])/3;
       return sum/(pixels.length/16)<145;
     }).slice(0,12);
-    if(dark.length)await worker.setParameters({tessedit_pageseg_mode:PSM.SINGLE_BLOCK});
+    if(dark.length)await Promise.race([worker.setParameters({tessedit_pageseg_mode:PSM.SINGLE_BLOCK}),fatal]);
     for(let i=0;i<dark.length;i++) {
       if(signal.aborted)throw Error("已取消解析");onProgress(91+i/dark.length*6,"识别深色控件中的文字");const b=dark[i],crop=document.createElement("canvas");crop.width=b.w+24;crop.height=b.h+24;const cc=crop.getContext("2d");if(!cc)throw Error("无法创建控件识别画布");cc.fillStyle="#ffffff";cc.fillRect(0,0,crop.width,crop.height);const pixels=ctx.getImageData(b.x,b.y,b.w,b.h);for(let k=0;k<pixels.data.length;k+=4){const v=255-Math.round((pixels.data[k]+pixels.data[k+1]+pixels.data[k+2])/3);pixels.data[k]=pixels.data[k+1]=pixels.data[k+2]=v;}cc.putImageData(pixels,12,12);
       const extra=await Promise.race([worker.recognize(crop,{}, {blocks:true}),fatal]);
@@ -88,5 +81,5 @@ export async function parseImage(image:{src:string;width:number;height:number;na
     if(nodes.length>1000)throw Error("识别超过 1000 个组件，请裁剪到单个界面后重试");
     const height=Math.round(image.height*scale);if(height<240||height>6000)throw Error("画布高度须在 240 至 6000 px 之间，请调整目标宽度");
     onProgress(100,"解析完成");return {...blankProject(),name:image.name.replace(/\.[^.]+$/, "")+" · 线框",width:options.width,height,nodes,reference:image,notes:"此项目由图片识别生成。所有 detected 组件须人工确认；未确认的文字、类型、字号、优先级和位置均为推测，不是最终规范。"};
-  }finally{active=false;signal.removeEventListener("abort",abort);if(timer)clearTimeout(timer);await worker?.terminate();}
+  }finally{active=false;shapeControl.abort(new Error("图形解析已结束"));signal.removeEventListener("abort",abort);if(timer)clearTimeout(timer);await worker?.terminate();}
 }

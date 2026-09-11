@@ -33,7 +33,7 @@ assert.equal(
   createHash("sha512").update(installer).digest("base64"),
 );
 const archive = join(output, "win-unpacked/resources/app.asar"),
-  files = listPackage(archive).map(file=>file.replaceAll("\\", "/"));
+  files = listPackage(archive).map((file) => file.replaceAll("\\", "/"));
 assert.ok(files.includes("/desktop/update-public-key.pem"));
 assert.ok(files.includes("/renderer/index.html"));
 assert.ok(

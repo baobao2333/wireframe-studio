@@ -6,6 +6,7 @@ const output = resolve(root, "public/ocr");
 await mkdir(resolve(output, "core"), { recursive: true });
 await mkdir(resolve(output, "lang"), { recursive: true });
 await cp(resolve(root, "node_modules/@techstark/opencv-js/dist/opencv.js"), resolve(output, "opencv.js"));
+await cp(resolve(root, "desktop/renderer/shape-worker.js"), resolve(output, "shape-worker.js"));
 await cp(resolve(root, "node_modules/tesseract.js/dist/worker.min.js"), resolve(output, "worker.min.js"));
 for (const file of await readdir(resolve(root, "node_modules/tesseract.js-core"))) {
   if (file.endsWith(".wasm.js")) await cp(resolve(root, "node_modules/tesseract.js-core", file), resolve(output, "core", file));

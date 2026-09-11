@@ -4,6 +4,7 @@ import formsModule from "grapesjs-plugin-forms";
 import {
   captureLibraryComponent,
   normalizeComponentStyle,
+  normalizeToolbarPointer,
 } from "../lib/component-snapshot.ts";
 import {
   exportHtml,
@@ -15,6 +16,7 @@ import {
 const editor = grapesjs.init({
   headless: true,
   storageManager: false,
+  dragMode: "absolute",
   avoidInlineStyle: true,
   plugins: [(e) => formsModule.default(e, { blocks: [] })],
 });
@@ -165,8 +167,34 @@ try {
   const html = exportHtml(editor, meta);
   assert.equal((html.match(/<body\b/g) || []).length, 1);
   assert.equal((html.match(/<\/body>/g) || []).length, 1);
+  let moveRoute;
+  const moveTarget = {
+    get: (key) => ({ draggable: true, selectable: true })[key],
+    trigger() {},
+    set() {},
+  };
+  editor.Commands.get("tlb-move").run({
+    getModel: () => ({ get: (key) => editor.getModel().get(key), stopDefault() {} }),
+    getSelectedAll: () => [moveTarget],
+    runCommand: (name, options) => { moveRoute = { name, mode: options.mode }; },
+    Commands: { get() { throw Error("Absolute toolbar drag must not enter the DOM sorter"); } },
+  }, null, { event: { clientX: 487, clientY: 472 } });
+  assert.deepEqual(moveRoute, { name: "core:component-drag", mode: "absolute" });
+  for (const zoom of [50, 77, 100, 150]) {
+    const scale = zoom / 100;
+    const pointer = { clientX: 747 - 260, clientY: 702 - 230, button: 0 };
+    normalizeToolbarPointer(pointer, zoom);
+    assert.equal(pointer.button, 0);
+    let position;
+    const dragger = new editor.Utils.Dragger({ setPosition: (next) => { position = next; } });
+    dragger.startPointer = dragger.getPointerPos(pointer);
+    dragger.startPosition = { x: 400, y: 640 };
+    dragger.drag({ clientX: (964 - 260) / scale, clientY: (702 - 230) / scale });
+    assert.ok(Math.abs(position.x - (400 + 217 / scale)) < 1e-8);
+    assert.ok(Math.abs(position.y - 640) < 1e-8);
+  }
   console.log(
-    "PASS: library serialization, nested and class/inline styles, independent instances, input traits, project reload, undo/redo, single HTML body.",
+    "PASS: library serialization, nested and class/inline styles, independent instances, input traits, project reload, undo/redo, single HTML body, absolute toolbar drag at 50/77/100/150 percent zoom.",
   );
 } finally {
   editor.destroy();

@@ -97,6 +97,7 @@ import {
   freshDefinition,
   captureLibraryComponent,
   normalizeComponentStyle,
+  normalizeToolbarPointer,
 } from "@/lib/component-snapshot";
 import {
   studioFile,
@@ -278,6 +279,17 @@ export default function GrapesStudio() {
     setMeta(next);
     persist();
   }
+  async function replaceProject(project: Project) {
+    try {
+      await flushProject();
+      await desktop?.acceptProject(null);
+      loadWireframe(project);
+      return true;
+    } catch (error) {
+      toast.error("原工程未能备份，已取消切换", { description: String(error) });
+      return false;
+    }
+  }
   function fit() {
     const ed = editor.current;
     if (!ed) return;
@@ -333,6 +345,8 @@ export default function GrapesStudio() {
         height: "100%",
         width: "auto",
         storageManager: false,
+        telemetry: false,
+        cssIcons: "",
         panels: { defaults: [] },
         plugins: [(ed) => forms(ed, { blocks: [] })],
         dragMode: "absolute",
@@ -397,7 +411,7 @@ export default function GrapesStudio() {
                 {
                   property: "font-size",
                   type: "number",
-                  name: "字号",
+                  name: "基础字号",
                   units: ["px"],
                 },
                 {
@@ -580,6 +594,12 @@ export default function GrapesStudio() {
       editor.current = ed;
       setInstance(ed);
       registerLibrary(ed);
+      // GrapesJS toolbar pointers are frame-relative but still screen-scaled.
+      ed.on(
+        "toolbar:run:before",
+        ({ event }: { event: { clientX: number; clientY: number } }) =>
+          normalizeToolbarPointer(event, ed.Canvas.getZoom()),
+      );
       const refresh = () => {
         setBlocks([...ed.BlockManager.getAll().models]);
         tick((v) => v + 1);
@@ -1515,11 +1535,11 @@ export default function GrapesStudio() {
             initialImage={meta.reference}
             open={importOpen}
             onOpenChange={setImportOpen}
-            onImport={(p) => {
-              void desktop?.acceptProject(null);
-              loadWireframe(p);
+            onImport={async (p) => {
+              if (!(await replaceProject(p))) return false;
               setImportOpen(false);
               toast.success(`已导入 ${p.nodes.length} 个可编辑组件`);
+              return true;
             }}
           />
         )}
@@ -1538,15 +1558,14 @@ export default function GrapesStudio() {
                 <button
                   className="command"
                   key={name}
-                  onClick={() => {
-                    void desktop?.acceptProject(null);
-                    loadWireframe({
+                  onClick={async () => {
+                    const changed = await replaceProject({
                       ...blankProject(),
                       name: `${name}界面`,
                       width: Number(w),
                       height: Number(h),
                     });
-                    setNewOpen(false);
+                    if (changed) setNewOpen(false);
                   }}
                 >
                   <Frame size={18} />

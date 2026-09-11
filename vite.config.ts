@@ -5,5 +5,5 @@ import { visionBridge } from "./server/vision-bridge.mjs";
 // Legacy loopback preview for migrating browser projects. Desktop builds use vite.desktop.config.ts.
 export default defineConfig({
   plugins: [visionBridge(), vinext()],
-  server: {host:"127.0.0.1",watch:{ignored:["**/public/ocr/**"]}},
+  server: { host: "127.0.0.1", watch: { ignored: ["**/public/ocr/**"] } },
 });

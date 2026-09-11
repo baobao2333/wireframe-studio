@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld(
     storageGet: (key) => call("storage:get", key),
     storageSet: (key, value) => call("storage:set", key, value),
     openProject: () => call("project:open"),
+    openImage: () => call("image:open"),
     saveProject: (project, saveAs) => call("project:save", project, saveAs),
     acceptProject: (path) => call("project:accept", path),
     onProject: (callback) => listen("project:opened", callback),
