@@ -5,6 +5,7 @@ import ts from "typescript";
 import React from "react";
 import {renderToStaticMarkup} from "react-dom/server";
 import * as wireframe from "../lib/wireframe.ts";
+import {VISION_TIMEOUT_MS} from "../desktop/vision-progress.mjs";
 
 const require=createRequire(import.meta.url);
 const transpile=async path=>ts.transpileModule(await readFile(new URL(path,import.meta.url),"utf8"),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText;
@@ -15,6 +16,7 @@ function client(api,refine=async project=>project){
     if(name==="./desktop")return {desktop:api};
     if(name==="./wireframe")return wireframe;
     if(name==="./recognition-refinement")return {refineRecognitionDraft:refine};
+    if(name==="../desktop/vision-progress.mjs")return {VISION_TIMEOUT_MS};
     throw Error(`Unexpected import: ${name}`);
   },exports,(fn,ms)=>setTimeout(fn,ms===1500?0:ms),clearTimeout);
   return exports.modelImage;
@@ -97,6 +99,9 @@ await test("progress markup describes milestones and real inactivity, not a comp
   const html=renderToStaticMarkup(React.createElement(exports.RecognitionProgress,{progress,onCancel:()=>{}}));
   for(const text of ["准备图片","模型识别","校验组件","完成","01:45","46 秒前","03:15","本机服务有响应","模型尚未返回新事件","取消解析"])assert.ok(html.includes(text),text);
   assert.ok(!/aria-valuenow|role="progressbar"|\d+%/.test(html));
+  const waiting=renderToStaticMarkup(React.createElement(exports.RecognitionProgress,{progress:{...progress,elapsedMs:301000,remainingMs:299000},onCancel:()=>{}}));
+  assert.ok(waiting.includes("已超过 5 分钟"));
+  assert.ok(waiting.includes("不会在此时中断"));
   const completed=renderToStaticMarkup(React.createElement(exports.RecognitionProgress,{progress:{...progress,stage:"complete",state:"complete",message:"已完成",nodeCount:1},onCancel:()=>{}}));
   assert.ok(!completed.includes("取消解析"));
   assert.equal((completed.match(/data-state="done"/g)||[]).length,4);

@@ -287,7 +287,6 @@ export async function buildExport(
     const opts = {
       width: meta.width,
       height: meta.height,
-      backgroundColor: "#ffffff",
       pixelRatio: Math.min(2, 6000 / meta.width, 6000 / meta.height),
       skipFonts: true,
     };

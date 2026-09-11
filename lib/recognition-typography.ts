@@ -1,7 +1,7 @@
 import { componentDefinition } from "./editor-library";
 import type { Project, WNode } from "./wireframe";
 
-const textKinds = new Set(["text", "richtext", "button", "tag", "avatar", "checkbox", "radio"]);
+const textKinds = new Set(["text", "richtext", "button", "tag", "avatar", "checkbox", "radio", "input", "select"]);
 const roundedSize = (size: number, scale: number) => Math.max(8, Math.floor(size * scale * 100) / 100);
 const appendNote = (node: WNode, note: string) => {
   node.note = [node.note, note].filter(Boolean).join("\n");
@@ -42,12 +42,13 @@ export async function refineRecognitionTypography(project: Project, signal?: Abo
       const inset = px(computed.paddingLeft) + px(computed.paddingRight) + px(computed.borderLeftWidth) + px(computed.borderRightWidth);
       const outline = node.textStroke && node.textStroke !== "none" ? node.textStrokeWidth || 0 : 0;
       const hasChoiceControl = node.type === "checkbox" || node.type === "radio";
+      const controlInset = hasChoiceControl ? 28 : node.type === "select" ? 18 : 0;
       const range = document.createRange();
       range.selectNodeContents(probe);
       const measure = (scale: number) => {
         probe.style.fontSize = `${roundedSize(node.fontSize, scale)}px`;
         spans.forEach((span, index) => { span.style.fontSize = `${roundedSize(node.runs![index].fontSize, scale)}px`; });
-        const width = range.getBoundingClientRect().width + inset + outline + (hasChoiceControl ? 28 : 0);
+        const width = range.getBoundingClientRect().width + inset + outline + controlInset;
         const height = Math.max(probe.getBoundingClientRect().height + outline, hasChoiceControl ? 18 : 0);
         return { width, height, fits: width <= node.w + 0.01 && height <= node.h + 0.01 };
       };

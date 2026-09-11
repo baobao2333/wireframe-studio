@@ -21,6 +21,7 @@ async function browserChecks(payload) {
     detected("text", { id: "amount", parentId: "panel", text: "$99.09", x: 180, y: 240, w: 330, h: 60, fontSize: 54, fontWeight: "700", color: "#ffffff" }),
     detected("image", { id: "ribbon", x: 50, y: 355, w: 620, h: 80, fill: "none", text: "" }),
     detected("text", { id: "options", text: "WITHDRAWAL OPTIONS", x: 166, y: 373, w: 389, h: 40, fontSize: 34, fontWeight: "700", align: "center", color: "#ffffff", textStroke: "#1c4800", textStrokeWidth: 2 }),
+    detected("select", { id: "text-only-select", text: "More", x: 580, y: 500, w: 86, h: 38, fontSize: 27, fill: "none", stroke: "none", color: "#ffffff" }),
     detected("richtext", { id: "rich", text: "PAYMENT\nAccount details", x: 45, y: 490, w: 260, h: 72, fontSize: 28, color: "#ffffff", runs: [
       { text: "PAYMENT\n", fontSize: 32, fontWeight: "700", color: "#ffffff", italic: false, underline: false },
       { text: "Account details", fontSize: 25, fontWeight: "400", color: "#eaf8ff", italic: false, underline: false },
@@ -51,7 +52,7 @@ async function browserChecks(payload) {
   await refineRecognitionTypography(project, abort.signal).then(() => { throw Error("Aborted refinement succeeded"); }, error => check(error.name === "AbortError", "Expected AbortError"));
   const host = document.createElement("div"); document.body.appendChild(host);
   const ed = grapes.init({ container: host, height: "740px", storageManager: false, telemetry: false, cssIcons: "", panels: { defaults: [] }, avoidInlineStyle: true });
-  const meta = { name: project.name, width: project.width, height: project.height, notes: refined.notes, engineRevision: 2 };
+  const meta = { name: project.name, width: project.width, height: project.height, notes: refined.notes, engineRevision: 2, reference: project.reference };
   try {
     await new Promise((resolve, reject) => { const timer = setTimeout(() => reject(Error("Canvas load timeout")), 15000); ed.on("load", () => { clearTimeout(timer); resolve(); }); });
     const render = async value => {
@@ -90,6 +91,12 @@ async function browserChecks(payload) {
       check(after.find(node => node.id === "rich").lines === 2, "Explicit rich-text lines must survive");
       check(refined.nodes.find(node => node.id === "background").fill === "#0482f4", "Source background color must survive");
       check(refined.nodes.find(node => node.id === "ribbon").fill === "#7bb906", "Source ribbon color must survive");
+      const select=ed.getWrapper().find('[data-spec-id="text-only-select"]')[0];
+      check(select.getStyle().padding === "0", "Borderless recognized controls must not receive library padding");
+      const font=select.getEl().ownerDocument.defaultView.getComputedStyle(select.getEl());
+      const metrics=document.createElement("canvas").getContext("2d"); metrics.font=`${font.fontWeight} ${font.fontSize} ${font.fontFamily}`;
+      check(metrics.measureText("More").width+18<=86, "Select text must fit alongside the native arrow");
+      check(componentDefinition(makeNode("select", {fill:"none",stroke:"none"})).style.padding === "0 12px", "Manual library controls keep their existing padding");
     }
     const imageProbe = ed.getWrapper().append(componentDefinition(detected("image", { id: "image-size-probe", text: "", x: 0, y: 0, w: 90, h: 36, fill: "#e0efff", stroke: "none", color: "none" })))[0];
     for (const [width, height] of [[90, 36], [36, 90], [390, 220]]) {
@@ -112,15 +119,20 @@ async function browserChecks(payload) {
       }
       probe.remove();
     }
+    await render(refined);
     const saved = validateStudioFile(JSON.parse(JSON.stringify(studioFile(ed, meta)))); await ed.loadProjectData(saved.editor);
     const html = exportHtml(ed, meta), react = exportReact(ed), svg = await (await buildExport(ed, meta, "svg")).blob.text();
-    check(html.includes("-webkit-text-stroke") && html.includes("white-space:pre"), "HTML must preserve source typography");
+    check(html.includes("white-space:pre"), "HTML must preserve source line layout");
+    if (refined.nodes.some(node => node.textStrokeWidth > 0)) check(html.includes("-webkit-text-stroke"), "HTML must preserve detected glyph outlines");
     check(html.includes('data-image-placeholder="diagonal-frame"') && svg.includes('data-image-placeholder="diagonal-frame"'), "Exports must retain the full-size image placeholders");
     check(!new DOMParser().parseFromString(svg, "image/svg+xml").querySelector("parsererror"), "SVG must remain valid");
+    const exportedBody=new DOMParser().parseFromString(svg,"image/svg+xml").querySelector("foreignObject > body");
+    const canvasBackground=ed.getWrapper().getEl().ownerDocument.defaultView.getComputedStyle(ed.getWrapper().getEl()).backgroundColor;
+    check(exportedBody?.style.backgroundColor===canvasBackground, "Export must retain the canvas background, not force white");
     const png = (await buildExport(ed, meta, "png")).blob;
     const bitmap = await createImageBitmap(png);
     const pngBase64 = await new Promise(resolve => { const reader = new FileReader(); reader.onload = () => resolve(reader.result.split(",")[1]); reader.readAsDataURL(png); });
-    return { before, after, refined, html, react, svg, pngBase64, width: bitmap.width, height: bitmap.height };
+    return { before, after, refined, studio: saved, html, react, svg, pngBase64, width: bitmap.width, height: bitmap.height };
   } finally { ed.destroy(); host.remove(); }
 }
 
@@ -138,7 +150,7 @@ if (process.versions.electron) {
       const compiled = ts.transpileModule(result.react, { compilerOptions: { jsx: ts.JsxEmit.ReactJSX }, reportDiagnostics: true });
       assert.equal((compiled.diagnostics || []).filter(diagnostic => diagnostic.category === ts.DiagnosticCategory.Error).length, 0);
       const output = process.env.WIREFRAME_FIDELITY_OUTPUT;
-      for (const [name, data] of Object.entries({ "fidelity.png": Buffer.from(result.pngBase64, "base64"), "fidelity.html": result.html, "fidelity.svg": result.svg, "Wireframe.tsx": result.react, "project.json": JSON.stringify(result.refined), "measurements.json": JSON.stringify({ before: result.before, after: result.after }, null, 2) })) await writeFile(join(output, name), data);
+      for (const [name, data] of Object.entries({ "fidelity.png": Buffer.from(result.pngBase64, "base64"), "fidelity.html": result.html, "fidelity.svg": result.svg, "Wireframe.tsx": result.react, "project.json": JSON.stringify(result.refined), "project.wireframe": JSON.stringify(result.studio), "measurements.json": JSON.stringify({ before: result.before, after: result.after }, null, 2) })) await writeFile(join(output, name), data);
       window.destroy();
       console.log(JSON.stringify({ passed: true, sourceCase: Boolean(payload), dimensions: [result.width, result.height], nodes: result.refined.nodes.length, layout: result.after.map(node => ({ name: node.name, fontSize: node.fontSize, lines: node.lines, expectedLines: node.expectedLines })), output }));
       app.exit(0);

@@ -32,6 +32,10 @@ Windows 桌面线框编辑器。用户定义信息层级、字号、对齐和组
 
 默认调用当前用户已安装并登录的本机 Codex，不另保存 API Key。图片会通过 Codex 发送到用户已配置的模型服务，并非纯离线识别；不修改全局模型或 provider 配置。模型使用与额度遵循用户的 Codex 账号和设置。
 
+识别子任务使用 `medium` 推理强度，并按实际 MCP 列表逐一禁用外部工具；这些覆盖只作用于该次识别。5 分钟时保留等待，不直接丢弃任务，10 分钟仍未收到完整结果才停止；用户始终可取消。失败信息区分已观测到的额度、登录和连接问题，不把所有失败都归为图片过大。
+
+应用数据目录的 `vision/diagnostics` 最多保留 100 条任务摘要，仅包含任务 ID、时间、阶段、事件计数、输出字符数和错误类别等诊断字段，不保存原图、文件名、正文、模型推理或密钥。原图和结果临时文件仍在任务结束后删除。
+
 模型结果始终是待确认草稿，保留置信度与备注。复杂插画或棋盘可能只得到占位组件，须检查布局、文本与层级后再交给 Codex。
 
 新识别初稿会从原图局部取样校准颜色，保留画布背景，区分文字描边与组件边框。渐变和复杂图片仅保留主色近似，不是原图片内容。文字按可用字体实际测量，并保留原图显式换行；最多缩小 20% 来校准字体差异，仍放不下时保留字号并记录待确认原因，不改文字或区域尺寸。已保存、已确认和手工组件不自动校准。属性面板可切换换行方式并编辑文字描边。
@@ -72,9 +76,9 @@ npm run package
 
 ```sh
 npm run package:signed
-node scripts/make-hot-update.mjs --version 1.1.0 --min-app-version 1.1.0 --tag v1.1.0 --output release --private-key .release-secrets/update-private-key.pem --native-path release/Wireframe-Studio-Setup-1.1.0-x64.exe --native-version 1.1.0
+node scripts/make-hot-update.mjs --version 1.1.1 --min-app-version 1.1.1 --tag v1.1.1 --output release --private-key .release-secrets/update-private-key.pem --native-path release/Wireframe-Studio-Setup-1.1.1-x64.exe --native-version 1.1.1
 node scripts/verify-release.mjs
-npm run test:signature -- --signed release/Wireframe-Studio-Setup-1.1.0-x64.exe
+npm run test:signature -- --signed release/Wireframe-Studio-Setup-1.1.1-x64.exe
 ```
 
 每个 Release 上传安装器、`.blockmap`、`latest.yml`、`renderer-<version>.zip`、`renderer-update.json` 和 `SHA256SUMS.txt`。私钥须单独备份。轮换公钥需要新桌面运行时，不能静默替换已有安装的信任根。

@@ -4,6 +4,7 @@ import {
 } from "./wireframe";
 import { desktop, type VisionJob, type VisionProgress } from "./desktop";
 import { refineRecognitionDraft } from "./recognition-refinement";
+import { VISION_TIMEOUT_MS } from "../desktop/vision-progress.mjs";
 type ImageInput = { src: string; name: string; width: number; height: number };
 export type ModelProgress = VisionProgress & {
   state: "running" | "complete" | "cancelled" | "failed";
@@ -26,7 +27,7 @@ export async function modelImage(
     stage: "starting", state: "running", message: "准备图片与识别环境",
     elapsedMs: 0, observedAt: startedAt, serviceSeenAt: null, remainingMs: null,
     activityAgeMs: null, eventCount: 0, outputChars: 0, nodeCount: null,
-    timeoutMs: 300000, warning: null,
+    timeoutMs: VISION_TIMEOUT_MS, warning: null,
   };
   const report = (update: Partial<ModelProgress>) => {
     progress = { ...progress, ...update, elapsedMs: Date.now() - startedAt, observedAt: Date.now() };

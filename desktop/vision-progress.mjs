@@ -1,4 +1,4 @@
-export const VISION_TIMEOUT_MS = 300000;
+export const VISION_TIMEOUT_MS = 600000;
 const stages = ["starting", "recognizing", "receiving", "validating", "complete"];
 const messages = {
   starting: "正在启动图片识别",
@@ -8,10 +8,11 @@ const messages = {
   complete: "识别完成",
 };
 
-export function createVisionProgress({ now = Date.now, maxLineBytes = 32 * 1024 * 1024,
+export function createVisionProgress({ now = Date.now, timeoutMs = VISION_TIMEOUT_MS, maxLineBytes = 32 * 1024 * 1024,
   maxStreamBytes = 64 * 1024 * 1024, maxItems = 512 } = {}) {
   const state = { stage: "starting", eventCount: 0, outputChars: 0, nodeCount: null,
-    timeoutMs: VISION_TIMEOUT_MS, warning: null };
+    timeoutMs, warning: null };
+  const diagnostic = { threadId: null, lastEventType: null, errorKind: null };
   const lengths = new Map();
   const decoder = new TextDecoder("utf-8", { fatal: true });
   let lastActivity = null, stoppedAt = null, ended = false, disabled = false;
@@ -29,6 +30,7 @@ export function createVisionProgress({ now = Date.now, maxLineBytes = 32 * 1024 
     switch (event.type) {
       case "thread.started":
         if (!validId(event.thread_id)) throw new Error("Invalid thread event");
+        if (/^[0-9a-f-]{36}$/.test(event.thread_id)) diagnostic.threadId = event.thread_id;
         break;
       case "turn.started":
         advance("recognizing");
@@ -37,6 +39,12 @@ export function createVisionProgress({ now = Date.now, maxLineBytes = 32 * 1024 
         break;
       case "turn.failed":
       case "error":
+        {
+          const message = String(event.error?.message || event.message || "");
+          diagnostic.errorKind = /quota|usage limit|rate.?limit|429|too many requests/i.test(message) ? "LIMIT"
+            : /unauthori[sz]ed|401|login|authentication|token.*expired/i.test(message) ? "AUTH"
+              : /connect|network|timed? ?out|TLS|stream.*closed|SSL|websocket|502|503|504/i.test(message) ? "NETWORK" : "MODEL";
+        }
         warn("Codex 报告了进度事件异常，最终结果仍须通过文件校验");
         break;
       case "item.started":
@@ -68,6 +76,7 @@ export function createVisionProgress({ now = Date.now, maxLineBytes = 32 * 1024 
       default: return;
     }
     state.eventCount += 1;
+    diagnostic.lastEventType = event.type;
     lastActivity = now();
   }
 
@@ -138,6 +147,8 @@ export function createVisionProgress({ now = Date.now, maxLineBytes = 32 * 1024 
 
   return {
     push, end, stop,
+    diagnostic: () => ({ ...diagnostic }),
+    notice: warn,
     streamError() {
       if (stoppedAt !== null) return;
       warn("识别进度流读取失败，后续仅校验结果文件");

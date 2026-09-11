@@ -130,6 +130,7 @@ export function componentDefinition(
   n: WNode,
   parent?: WNode,
 ): ComponentDefinition {
+  const controlPadding = n.origin === "detected" && !n.reviewed && n.fill === "none" && n.stroke === "none" ? "0" : "0 12px";
   const css: Record<string, string | number> = {
     position: "absolute",
     left: `${n.x - (parent?.x || 0)}px`,
@@ -210,7 +211,7 @@ export function componentDefinition(
           : n.align === "right"
             ? "flex-end"
             : "flex-start",
-      padding: "0 12px",
+      padding: controlPadding,
     });
     if (n.type === "button") def.tagName = "button";
     if (n.type === "avatar") css["border-radius"] = "50%";
@@ -220,7 +221,7 @@ export function componentDefinition(
     def.type = "input";
     def.attributes = { ...def.attributes, type: "text", placeholder: n.text };
     def.components = [];
-    css.padding = "0 12px";
+    css.padding = controlPadding;
   }
   if (n.type === "select") {
     def.tagName = "select";
@@ -232,7 +233,7 @@ export function componentDefinition(
         components: [txt(n.text || "请选择")],
       },
     ];
-    css.padding = "0 12px";
+    css.padding = controlPadding;
   }
   if (n.type === "image") {
     const channels = n.fill === "none" ? [255, 255, 255] : [1, 3, 5].map(offset => parseInt(n.fill.slice(offset, offset + 2), 16));

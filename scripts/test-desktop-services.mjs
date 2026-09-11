@@ -7,6 +7,7 @@ import { PassThrough } from "node:stream";
 import { atomicJson, createStorage } from "../desktop/storage.mjs";
 import { createVisionService } from "../desktop/vision-service.mjs";
 import { createVisionProgress, VISION_TIMEOUT_MS } from "../desktop/vision-progress.mjs";
+import { isolatedVisionMcpOptions, visionFeatureOptions } from "../desktop/vision-config.mjs";
 
 const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "wireframe-services-test-"));
 const services = [];
@@ -46,7 +47,7 @@ function fakeProcess() {
 async function visionFixture(options = {}) {
   const runtimeDir = await fixtureDirectory();
   const service = createVisionService({ runtimeDir, instructionsPath: path.join(temporaryRoot, "instructions.txt"),
-    findCodexImpl: async () => "fixture-codex.exe", ...options });
+    findCodexImpl: async () => "fixture-codex.exe", mcpIsolationImpl:async()=>["-c","mcp_servers={}"], ...options });
   services.push(service);
   return { service, runtimeDir };
 }
@@ -374,6 +375,50 @@ try {
     assert.match(failed.progress.warning, /读取失败/);
     assert.match(failed.error, /不是有效 JSON/);
     assert.doesNotMatch(JSON.stringify(failed), /PRIVATE/);
+  });
+
+  await test("vision isolation disables every listed MCP without starting it or changing provider settings", async () => {
+    const options = await isolatedVisionMcpOptions("fixture.exe", (_exe, args) => {
+      assert.deepEqual(args, [...visionFeatureOptions, "mcp", "list", "--json"]);
+      const child = fakeProcess();
+      queueMicrotask(() => { child.stdout.write(JSON.stringify([{name:"wireframe-studio"},{name:"node_repl"}])); child.emit("close",0); });
+      return child;
+    });
+    assert.deepEqual(options,["-c","mcp_servers.wireframe-studio.enabled=false","-c","mcp_servers.node_repl.enabled=false"]);
+    const {service,runtimeDir}=await visionFixture({mcpIsolationImpl:async()=>{throw Error("Isolation fixture failure");},spawnImpl:()=>{throw Error("Must not spawn vision");}});
+    await assert.rejects(service.start(input),/Isolation fixture failure/);
+    assert.deepEqual(await readdir(runtimeDir),[]);
+    assert.equal(service.isBusy(),false);
+  });
+
+  await test("the longer bounded wait ends safely and preserves only sanitized diagnostics", async () => {
+    assert.equal(VISION_TIMEOUT_MS,600000);
+    let child;
+    const diagnosticsDir=await fixtureDirectory();
+    const {service,runtimeDir}=await visionFixture({timeoutMs:50,diagnosticsDir,spawnImpl:()=>child=fakeProcess()});
+    const {id}=await service.start({...input,name:"PRIVATE_FILENAME.png"});
+    child.stdout.write(eventLine({type:"thread.started",thread_id:"11111111-2222-3333-4444-555555555555"}));
+    child.stdout.write(eventLine({type:"turn.started"}));
+    child.stdout.write(eventLine({type:"error",message:"TLS connection reset PRIVATE_TOKEN"}));
+    await waitUntil(()=>!service.isBusy());
+    const failed=service.get(id);
+    assert.equal(failed.status,"failed");assert.match(failed.error,/10 分钟/);assert.equal(failed.result,null);
+    const diagnostic=JSON.parse(await readFile(path.join(diagnosticsDir,`${id}.json`),"utf8"));
+    assert.equal(diagnostic.stopReason,"TIMEOUT");assert.equal(diagnostic.errorKind,"NETWORK");
+    assert.equal(diagnostic.threadId,"11111111-2222-3333-4444-555555555555");assert.equal(diagnostic.eventCount,3);
+    assert.doesNotMatch(JSON.stringify(diagnostic),/PRIVATE|base64|image fixture/);
+    assert.deepEqual(await readdir(runtimeDir),[]);
+    child.stdout.write(eventLine({type:"item.completed",item:{id:"late",type:"agent_message",text:"PRIVATE"}}));
+    assert.deepEqual(service.get(id),failed);
+  });
+
+  await test("known network, account and authentication failures do not become generic login advice",async()=>{
+    for(const [message,expected] of [["429 usage limit PRIVATE",/额度/],["401 authentication PRIVATE",/凭据/],["stream disconnected PRIVATE",/连接中断/]]){
+      let child;const {service}=await visionFixture({spawnImpl:()=>child=fakeProcess()});
+      const {id}=await service.start(input);
+      child.stdout.write(eventLine({type:"turn.failed",error:{message}}));child.emit("close",1);
+      await waitUntil(()=>!service.isBusy());assert.match(service.get(id).error,expected);assert.doesNotMatch(JSON.stringify(service.get(id)),/PRIVATE/);
+    }
   });
 
   console.log(`Desktop service checks passed: ${passed}; platform=${process.platform}; node=${process.version}`);

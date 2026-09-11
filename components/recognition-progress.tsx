@@ -60,6 +60,7 @@ export function RecognitionProgress({ progress, onCancel }: {
           {remaining !== null && <span>超时剩余 {duration(remaining)}</span>}
         </p>
         {!stalledService && step === 1 && age !== null && age >= 30000 && <p className="recognition-waiting">模型尚未返回新事件，仍在等待结果。</p>}
+        {step === 1 && elapsed >= 300000 && remaining !== null && <p className="recognition-warning">已超过 5 分钟，尚未收到完整结果。不会在此时中断；达到等待上限后停止，也可现在取消。</p>}
         <button type="button" className="cancel-parse" onClick={onCancel}><X size={14} />取消解析</button>
       </>}
     </section>

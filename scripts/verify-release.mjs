@@ -63,7 +63,7 @@ assert.equal(bundled.appVersion, pkg.version);
 assert.equal(bundled.rendererVersion, payload.version);
 assert.equal(payload.minAppVersion, bundled.minAppVersion);
 for (const name of ["main.mjs", "preload.cjs", "electron-fetch.mjs", "hot-update.mjs",
-  "storage.mjs", "vision-service.mjs", "vision-progress.mjs", "release.json", "update-public-key.pem",
+  "storage.mjs", "vision-service.mjs", "vision-progress.mjs", "vision-config.mjs", "vision-diagnostics.mjs", "release.json", "update-public-key.pem",
   "publisher.json", "windows-signature.mjs", "verify-signature.ps1",
   "control-service.mjs", "control-rpc.mjs", "control-registration.mjs"]) {
   assert.deepEqual(extractFile(archive, join("desktop", name)), await readFile(join(root, "desktop", name)), name);
