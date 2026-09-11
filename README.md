@@ -54,9 +54,9 @@ npm run package
 
 ```sh
 npm run package:signed
-node scripts/make-hot-update.mjs --version 1.0.5 --min-app-version 1.0.3 --tag v1.0.5 --output release --private-key .release-secrets/update-private-key.pem --native-path release/Wireframe-Studio-Setup-1.0.5-x64.exe --native-version 1.0.5
+node scripts/make-hot-update.mjs --version 1.0.6 --min-app-version 1.0.6 --tag v1.0.6 --output release --private-key .release-secrets/update-private-key.pem --native-path release/Wireframe-Studio-Setup-1.0.6-x64.exe --native-version 1.0.6
 node scripts/verify-release.mjs
-npm run test:signature -- --signed release/Wireframe-Studio-Setup-1.0.5-x64.exe
+npm run test:signature -- --signed release/Wireframe-Studio-Setup-1.0.6-x64.exe
 ```
 
 每个 Release 上传安装器、`.blockmap`、`latest.yml`、`renderer-<version>.zip`、`renderer-update.json` 和 `SHA256SUMS.txt`。私钥须单独备份。轮换公钥需要新桌面运行时，不能静默替换已有安装的信任根。

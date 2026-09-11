@@ -1,7 +1,5 @@
 import {
-  blankProject,
-  makeNode,
-  validateProject,
+  recognitionProject,
   type Project,
 } from "./wireframe";
 import { desktop, type VisionJob } from "./desktop";
@@ -67,35 +65,7 @@ export async function modelImage(
       if (job.status === "cancelled") throw Error("识别已取消");
       onStatus(`${job.message} · ${Math.round(job.elapsed / 1000)} 秒`);
       if (job.status === "done") {
-        const result = job.result;
-        const p = {
-          ...blankProject(),
-          name: result.title,
-          width: result.width,
-          height: result.height,
-          notes: result.summary,
-          reference: image,
-          nodes: result.nodes.map((n: Record<string, unknown>) =>
-            makeNode(n.type as Parameters<typeof makeNode>[0], {
-              ...n,
-              origin: "detected",
-              reviewed: false,
-              locked: false,
-              hidden: false,
-              strokeWidth: 1,
-            }),
-          ),
-        };
-        const checked = validateProject(p);
-        if (checked.width !== width)
-          throw Error("模型返回的画布尺寸不一致，请重试");
-        for (const n of checked.nodes)
-          if (
-            n.type === "richtext" &&
-            n.runs?.map((r) => r.text).join("") !== n.text
-          )
-            throw Error(`富文本内容不一致：${n.name}`);
-        return checked;
+        return recognitionProject(job.result, image, width);
       }
     }
     throw Error("已取消识别");

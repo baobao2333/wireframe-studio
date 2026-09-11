@@ -66,6 +66,8 @@ for (const name of ["main.mjs", "preload.cjs", "electron-fetch.mjs", "hot-update
   "publisher.json", "windows-signature.mjs", "verify-signature.ps1"]) {
   assert.deepEqual(extractFile(archive, join("desktop", name)), await readFile(join(root, "desktop", name)), name);
 }
+assert.deepEqual(extractFile(archive, join("server", "vision-schema.mjs")), await readFile(join(root, "server", "vision-schema.mjs")));
+assert.deepEqual(await readFile(join(output, "win-unpacked/resources/vision-instructions.txt")), await readFile(join(root, "server/vision-instructions.txt")));
 let healthCalls = 0;
 for (const [name, bytes] of Object.entries(rendererFiles)) {
   assert.deepEqual(extractFile(archive, join("renderer", name)), Buffer.from(bytes), name);

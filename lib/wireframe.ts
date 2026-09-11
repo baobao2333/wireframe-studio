@@ -77,3 +77,48 @@ export function validateProject(raw: unknown): Project {
   }
   return p;
 }
+
+export type RecognitionResult = {
+  title: string;
+  summary: string;
+  width: number;
+  height: number;
+  nodes: Record<string, unknown>[];
+};
+
+export function recognitionProject(result: RecognitionResult, reference: Project["reference"], targetWidth: number): Project {
+  const project = {
+    ...blankProject(), name: result.title, width: result.width, height: result.height,
+    notes: result.summary, reference,
+    nodes: result.nodes.map((node) => makeNode(node.type as Kind, {
+      ...node, origin: "detected", reviewed: false, locked: false, hidden: false, strokeWidth: 1,
+    })),
+  };
+  let checked: Project;
+  try {
+    checked = validateProject(project);
+  } catch (error) {
+    if (!(error instanceof z.ZodError)) throw error;
+    const details = error.issues.slice(0, 5).map((issue) => {
+      const index = issue.path[0] === "nodes" && typeof issue.path[1] === "number" ? issue.path[1] : null;
+      const node = index === null ? null : project.nodes[index];
+      const field = issue.path.slice(index === null ? 0 : 2).join(".");
+      let actual: unknown = project;
+      for (const key of issue.path) {
+        actual = actual !== null && typeof actual === "object" ? (actual as Record<string | number, unknown>)[key] : undefined;
+      }
+      const value = JSON.stringify(actual)?.slice(0, 120) ?? "缺失";
+      const location = node ? `第 ${index! + 1} 个组件“${node.name}”的 ${field}` : field;
+      const rule = field === "value" ? "必须在 0～1 之间；它表示进度或控件状态，页面数字应放在 text 中"
+        : field.endsWith("fontSize") ? "字号必须在 8～160 px 之间" : issue.message;
+      return `${location}=${value}：${rule}`;
+    });
+    throw new Error(`识别结果未通过校验：${details.join("；")}。原画布未修改。`);
+  }
+  if (checked.width !== targetWidth) throw new Error("模型返回的画布尺寸不一致，请重试");
+  for (const node of checked.nodes) {
+    if (node.type === "richtext" && node.runs?.map((run) => run.text).join("") !== node.text)
+      throw new Error(`富文本内容不一致：${node.name}`);
+  }
+  return checked;
+}
