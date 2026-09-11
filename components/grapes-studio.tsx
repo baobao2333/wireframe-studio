@@ -75,6 +75,7 @@ import {
 import { get, set } from "@/lib/storage";
 import { desktop, copyText, type OpenedProject } from "@/lib/desktop";
 import { DesktopSettings } from "./desktop-settings";
+import { createColorPickerPositioning } from "@/lib/color-picker-positioning";
 import appIcon from "@/assets/app.png?url";
 import { toast, Toaster } from "sonner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -419,6 +420,9 @@ export default function GrapesStudio() {
     ed.UndoManager.stop();
     ed.setStyle(baseCanvasCss);
     ed.setComponents(projectComponents(p));
+    ed.getWrapper()?.addStyle({
+      "background-color": p.background === "none" ? "transparent" : p.background,
+    });
     metaRef.current = {
       name: p.name,
       notes: p.notes,
@@ -437,10 +441,12 @@ export default function GrapesStudio() {
   }
   useEffect(() => {
     let alive = true,
-      resize: ResizeObserver | undefined;
+      resize: ResizeObserver | undefined,
+      colorPositioning: ReturnType<typeof createColorPickerPositioning> | undefined;
     (async () => {
       const grapes = (await import("grapesjs")).default;
       if (!alive || !host.current) return;
+      colorPositioning = createColorPickerPositioning(styleHost.current!, grapes.$);
       const ed = grapes.init({
         container: host.current,
         height: "100%",
@@ -448,6 +454,7 @@ export default function GrapesStudio() {
         storageManager: false,
         telemetry: false,
         cssIcons: "",
+        colorPicker: colorPositioning.options,
         panels: { defaults: [] },
         plugins: [(ed) => forms(ed, { blocks: [] })],
         dragMode: "absolute",
@@ -543,6 +550,12 @@ export default function GrapesStudio() {
                   ],
                 },
                 { property: "color", type: "color", name: "文字颜色" },
+                { property: "white-space", type: "select", name: "换行", options: [
+                  { id: "pre-wrap", label: "自动换行" },
+                  { id: "pre", label: "保留原图行" },
+                ] },
+                { property: "-webkit-text-stroke-width", type: "number", name: "文字描边宽度", units: ["px"], min: 0, max: 12 },
+                { property: "-webkit-text-stroke-color", type: "color", name: "文字描边颜色" },
               ],
             },
             {
@@ -833,6 +846,7 @@ export default function GrapesStudio() {
       alive = false;
       resize?.disconnect();
       canSave.current = false;
+      colorPositioning?.destroy();
       editor.current?.destroy();
       editor.current = null;
     };

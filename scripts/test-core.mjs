@@ -18,14 +18,22 @@ assert.equal(modelNodeSchema.value.minimum,0);
 assert.equal(modelNodeSchema.value.maximum,1);
 assert.equal(modelNodeSchema.runs.items.properties.fontSize.minimum,8);
 assert.equal(modelNodeSchema.runs.items.properties.fontSize.maximum,160);
-const recognition={title:"Value regression",summary:"",width:703,height:1193,nodes:Array.from({length:16},(_,i)=>m.makeNode(i===15?"progress":"text",{id:`node-${i}`,name:`component-${i}`,text:i===15?"78%":"$12,450",value:0}))};
+const recognition={title:"Value regression",summary:"",width:703,height:1193,background:"#007eee",nodes:Array.from({length:16},(_,i)=>m.makeNode(i===15?"progress":"text",{id:`node-${i}`,name:`component-${i}`,text:i===15?"78%":"$12,450",value:0}))};
 for(const value of [0,0.78,1]){
   const input=structuredClone(recognition);input.nodes[15].value=value;
   const before=structuredClone(input),result=m.recognitionProject(input,null,703);
   assert.equal(result.nodes[15].value,value);assert.equal(result.nodes[15].text,"78%");
   assert.equal(result.nodes[0].text,"$12,450");assert.deepEqual(input,before);
+  assert.equal(result.background,"#007eee");
   assert.ok(result.nodes.every(n=>n.origin==="detected"&&!n.reviewed));
 }
+assert.throws(()=>m.recognitionProject({...recognition,background:undefined},null,703),/background/);
+assert.equal(modelNodeSchema.textStrokeWidth.maximum,12);
+const outlined=m.recognitionProject({...recognition,nodes:[m.makeNode("text",{text:"Heading",stroke:"#ffffff",strokeWidth:3,textStroke:"#071b64",textStrokeWidth:4})]},null,703);
+assert.equal(outlined.nodes[0].strokeWidth,3);
+assert.equal(outlined.nodes[0].textStrokeWidth,4);
+assert.equal(outlined.nodes[0].textStroke,"#071b64");
+assert.throws(()=>m.validateProject({...outlined,nodes:[{...outlined.nodes[0],textStrokeWidth:13}]}));
 for(const type of ["progress","text"]){
   for(const value of [-0.1,1.01,78]){
     const input=structuredClone(recognition);input.nodes[15].type=type;input.nodes[15].value=value;

@@ -9,6 +9,8 @@ import {
 } from "./wireframe";
 import { iconAssets, iconChoices, symbolFontFamily, symbolPresets, type IconName } from "./icon-assets";
 
+export const textFontFamily = "Arial, Microsoft YaHei, sans-serif";
+
 const txt = (text: string): ComponentDefinition => ({
   type: "textnode",
   content: text,
@@ -139,18 +141,25 @@ export function componentDefinition(
     "line-height": String(n.lineHeight),
     "text-align": n.align,
     color: n.color === "none" ? "transparent" : n.color,
-    background: n.fill === "none" ? "transparent" : n.fill,
-    border:
-      n.stroke === "none" ? "none" : `${n.strokeWidth}px solid ${n.stroke}`,
+    "background-color": n.fill === "none" ? "transparent" : n.fill,
+    "border-width": n.stroke === "none" ? "0px" : `${n.strokeWidth}px`,
+    "border-style": n.stroke === "none" ? "none" : "solid",
+    "border-color": n.stroke === "none" ? "transparent" : n.stroke,
     "border-radius": `${n.radius}px`,
-    "white-space": "pre-wrap",
-    "overflow-wrap": "anywhere",
+    "white-space": n.textLayout === "source-lines" ? "pre" : "pre-wrap",
+    "overflow-wrap": n.textLayout === "source-lines" ? "normal" : "anywhere",
     "box-sizing": "border-box",
     margin: "0",
     padding: "0",
-    "font-family": "Arial, Microsoft YaHei, sans-serif",
+    "font-family": textFontFamily,
+    "letter-spacing": "0",
     display: n.hidden ? "none" : "block",
   };
+  if (n.textStroke && n.textStroke !== "none" && n.textStrokeWidth) {
+    css["-webkit-text-stroke-color"] = n.textStroke;
+    css["-webkit-text-stroke-width"] = `${n.textStrokeWidth}px`;
+    css["paint-order"] = "stroke fill";
+  }
   const def: ComponentDefinition = {
     tagName: "div",
     type: ["text", "richtext", "button", "tag", "avatar"].includes(n.type)
@@ -186,7 +195,7 @@ export function componentDefinition(
       style: {
         "font-size": `${r.fontSize}px`,
         "font-weight": r.fontWeight,
-        color: r.color,
+        color: r.color === "none" ? "transparent" : r.color,
         "font-style": r.italic ? "italic" : "normal",
         "text-decoration": r.underline ? "underline" : "none",
       },
@@ -226,31 +235,28 @@ export function componentDefinition(
     css.padding = "0 12px";
   }
   if (n.type === "image") {
+    const channels = n.fill === "none" ? [255, 255, 255] : [1, 3, 5].map(offset => parseInt(n.fill.slice(offset, offset + 2), 16));
+    const markerColor = channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722 < 145 ? "#d5e2ec" : "#788696";
     def.components = [
       {
-        tagName: "div",
-        attributes: { "data-gjs-selectable": "false" },
+        type: "svg",
+        tagName: "svg",
+        selectable: false,
+        hoverable: false,
+        draggable: false,
+        droppable: false,
+        layerable: false,
+        attributes: { xmlns: "http://www.w3.org/2000/svg", width: "100%", height: "100%", "aria-hidden": "true", "data-image-placeholder": "diagonal-frame" },
         style: {
-          display: "flex",
-          width: "100%",
-          height: "100%",
-          "align-items": "center",
-          "justify-content": "center",
-          color: "#a0a5ac",
+          position: "absolute", left: "0", top: "0", width: "100%", height: "100%", display: "block", overflow: "visible", "pointer-events": "none", color: markerColor,
         },
         components: [
-          {
-            tagName: "span",
-            content: iconAssets.image.replace(
-              /<svg /,
-              '<svg width="24" height="24" ',
-            ),
-            selectable: false,
-            draggable: false,
-          },
-          txt(n.text ? " " + n.text : ""),
+          { tagName: "rect", type: "svg-in", attributes: { x: "0", y: "0", width: "100%", height: "100%", fill: "none", stroke: "currentColor", "stroke-width": "1" } },
+          { tagName: "line", type: "svg-in", attributes: { x1: "0", y1: "0", x2: "100%", y2: "100%", stroke: "currentColor", "stroke-width": "1" } },
+          { tagName: "line", type: "svg-in", attributes: { x1: "100%", y1: "0", x2: "0", y2: "100%", stroke: "currentColor", "stroke-width": "1" } },
         ],
       },
+      ...(n.text ? [{ tagName: "div", selectable: false, hoverable: false, draggable: false, layerable: false, style: { position: "absolute", left: "4px", right: "4px", bottom: "4px", "text-align": "center" }, components: [txt(n.text)] } as ComponentDefinition] : []),
     ];
   }
   if (n.type === "icon") {
@@ -285,7 +291,7 @@ export function componentDefinition(
   }
   if (n.type === "switch") {
     Object.assign(css, {
-      background: n.value! > 0.5 ? n.color : "#c9cdd3",
+      "background-color": n.origin === "detected" ? (n.fill === "none" ? "transparent" : n.fill) : n.value! > 0.5 ? n.color : "#c9cdd3",
       "border-radius": `${n.h / 2}px`,
       padding: "3px",
       display: "flex",
@@ -297,7 +303,7 @@ export function componentDefinition(
         style: {
           width: `${n.h - 6}px`,
           height: `${n.h - 6}px`,
-          background: "#fff",
+          "background-color": n.origin === "detected" ? (n.color === "none" ? "transparent" : n.color) : "#fff",
           "border-radius": "50%",
         },
         draggable: false,
@@ -305,14 +311,14 @@ export function componentDefinition(
     ];
   }
   if (n.type === "progress") {
-    css.background = "#e5e8ec";
+    css["background-color"] = n.origin === "detected" ? (n.fill === "none" ? "transparent" : n.fill) : "#e5e8ec";
     def.components = [
       {
         tagName: "div",
         style: {
           width: `${(n.value || 0) * 100}%`,
           height: "100%",
-          background: n.color,
+          "background-color": n.color === "none" ? "transparent" : n.color,
           "border-radius": `${n.radius}px`,
         },
       },
@@ -322,8 +328,8 @@ export function componentDefinition(
     Object.assign(css, {
       display: "flex",
       "align-items": "stretch",
-      border: "none",
-      "border-bottom": `1px solid ${n.stroke}`,
+      "border-width": "0px",
+      "border-bottom-width": n.stroke === "none" ? "0px" : "1px",
     });
     def.components = (n.items || []).map((s, i) =>
       label(s, {
@@ -331,7 +337,9 @@ export function componentDefinition(
         display: "flex",
         "align-items": "center",
         "justify-content": "center",
-        "border-bottom": i === 0 ? `2px solid ${n.color}` : "none",
+        "border-bottom-width": i === 0 ? "2px" : "0px",
+        "border-bottom-style": i === 0 && n.color !== "none" ? "solid" : "none",
+        "border-bottom-color": n.color === "none" ? "transparent" : n.color,
       }),
     );
   }
@@ -339,14 +347,17 @@ export function componentDefinition(
     Object.assign(css, {
       display: "flex",
       "flex-direction": "column",
-      border: "none",
+      "border-width": "0px",
+      "border-style": "none",
     });
     def.components = (n.items || []).map((s) =>
       label(s, {
         flex: "1",
         display: "flex",
         "align-items": "center",
-        "border-bottom": `1px solid ${n.stroke}`,
+        "border-bottom-width": n.stroke === "none" ? "0px" : "1px",
+        "border-bottom-style": n.stroke === "none" ? "none" : "solid",
+        "border-bottom-color": n.stroke === "none" ? "transparent" : n.stroke,
         padding: "0 12px",
       }),
     );
@@ -366,10 +377,12 @@ export function componentDefinition(
             tagName: i === 0 ? "th" : "td",
             components: [txt(s)],
             style: {
-              border: `1px solid ${n.stroke}`,
+              "border-width": n.stroke === "none" ? "0px" : "1px",
+              "border-style": n.stroke === "none" ? "none" : "solid",
+              "border-color": n.stroke === "none" ? "transparent" : n.stroke,
               padding: "8px 10px",
               "font-weight": i === 0 ? "600" : "400",
-              background: i === 0 ? "#f3f4f6" : "transparent",
+              "background-color": i === 0 && n.origin !== "detected" ? "#f3f4f6" : "transparent",
             },
           })),
         })),

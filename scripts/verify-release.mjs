@@ -11,6 +11,7 @@ import { verifyWindowsInstaller, verifyWindowsSignature } from "../desktop/windo
 const root = resolve(import.meta.dirname, ".."),
   output = join(root, "release");
 const pkg = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
+const native = join(output, `native-${pkg.version}`, "win-unpacked");
 const manifest = JSON.parse(
   await readFile(join(output, "renderer-update.json"), "utf8"),
 );
@@ -25,7 +26,7 @@ const certificate = new X509Certificate(await readFile(join(root, "assets/publis
 assert.equal(certificate.subject, publisher.subject);
 assert.equal(certificate.fingerprint256.replaceAll(":", ""), publisher.certificateSha256);
 const installerSignature = await verifyWindowsInstaller(join(output, payload.native.filename), payload.native);
-await verifyWindowsSignature(join(output, "win-unpacked/Wireframe Studio.exe"));
+await verifyWindowsSignature(join(native, "Wireframe Studio.exe"));
 const rendererZip = await readFile(join(output, payload.archive.filename));
 assert.equal(rendererZip.length, payload.archive.size);
 assert.equal(createHash("sha256").update(rendererZip).digest("hex"), payload.archive.sha256);
@@ -44,7 +45,7 @@ assert.equal(
   latest.files[0].sha512,
   createHash("sha512").update(installer).digest("base64"),
 );
-const archive = join(output, "win-unpacked/resources/app.asar"),
+const archive = join(native, "resources/app.asar"),
   files = listPackage(archive).map((file) => file.replaceAll("\\", "/"));
 assert.ok(files.includes("/desktop/update-public-key.pem"));
 assert.ok(files.includes("/renderer/index.html"));
@@ -67,7 +68,7 @@ for (const name of ["main.mjs", "preload.cjs", "electron-fetch.mjs", "hot-update
   assert.deepEqual(extractFile(archive, join("desktop", name)), await readFile(join(root, "desktop", name)), name);
 }
 assert.deepEqual(extractFile(archive, join("server", "vision-schema.mjs")), await readFile(join(root, "server", "vision-schema.mjs")));
-assert.deepEqual(await readFile(join(output, "win-unpacked/resources/vision-instructions.txt")), await readFile(join(root, "server/vision-instructions.txt")));
+assert.deepEqual(await readFile(join(native, "resources/vision-instructions.txt")), await readFile(join(root, "server/vision-instructions.txt")));
 let healthCalls = 0;
 for (const [name, bytes] of Object.entries(rendererFiles)) {
   assert.deepEqual(extractFile(archive, join("renderer", name)), Buffer.from(bytes), name);
@@ -96,7 +97,7 @@ for (const resource of [
   "app.ico",
 ])
   assert.ok(
-    (await stat(join(output, "win-unpacked/resources", resource))).size > 0,
+    (await stat(join(native, "resources", resource))).size > 0,
   );
 const assets = [
   payload.native.filename,

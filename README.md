@@ -14,6 +14,7 @@ Windows 桌面线框编辑器。用户定义信息层级、字号、对齐和组
 - 编辑信息层级、字号、间距、颜色、对齐和实现备注。
 - 图标支持 Lucide 图标库或 Unicode / emoji 符号占位，含常用符号组件与专属编辑。符号随工程、组件库和导出代码保留；彩色 emoji 的形状与配色由系统字体决定，单色符号可以改色。
 - 符号不自动折行。溢出时可主动使用“适配符号字号”，只缩小字号并支持撤销；不会自动改变用户定义的区域尺寸或字号。
+- 图片用完整矩形与两条对角线占位，随组件宽高调整；识别图片占位保留原图主色，不再用小图片图标代替区域大小。
 - 打开 `.wireframe` 和兼容 JSON；当前工程与组件库自动保存到当前 Windows 用户的应用数据目录。原浏览器版数据不会自动迁移，可先导出 `project.json` 再在桌面版打开。
 - 导出 ZIP 包含 PNG、SVG、HTML、React TSX、工程 JSON、设计规范和 Codex 交接文本。导出代码是静态界面，不是已完成的业务应用。
 
@@ -22,6 +23,8 @@ Windows 桌面线框编辑器。用户定义信息层级、字号、对齐和组
 默认调用当前用户已安装并登录的本机 Codex，不另保存 API Key。图片会通过 Codex 发送到用户已配置的模型服务，并非纯离线识别；不修改全局模型或 provider 配置。模型使用与额度遵循用户的 Codex 账号和设置。
 
 模型结果始终是待确认草稿，保留置信度与备注。复杂插画或棋盘可能只得到占位组件，须检查布局、文本与层级后再交给 Codex。
+
+新识别初稿会从原图局部取样校准颜色，保留画布背景，区分文字描边与组件边框。渐变和复杂图片仅保留主色近似，不是原图片内容。文字按可用字体实际测量，并保留原图显式换行；最多缩小 20% 来校准字体差异，仍放不下时保留字号并记录待确认原因，不改文字或区域尺寸。已保存、已确认和手工组件不自动校准。属性面板可切换换行方式并编辑文字描边。
 
 识别面板显示准备、模型识别、组件校验和完成阶段，以及已用时、最近事件、本机服务响应和超时剩余时间。阶段来自实际任务与 Codex JSONL 事件，不估算模型完成百分比；长时间没有新事件不等于连接已断开。进度中不展示模型推理或原始消息内容。
 
@@ -58,11 +61,13 @@ npm run package
 
 ```sh
 npm run package:signed
-node scripts/make-hot-update.mjs --version 1.0.7 --min-app-version 1.0.7 --tag v1.0.7 --output release --private-key .release-secrets/update-private-key.pem --native-path release/Wireframe-Studio-Setup-1.0.7-x64.exe --native-version 1.0.7
+node scripts/make-hot-update.mjs --version 1.0.8 --min-app-version 1.0.8 --tag v1.0.8 --output release --private-key .release-secrets/update-private-key.pem --native-path release/Wireframe-Studio-Setup-1.0.8-x64.exe --native-version 1.0.8
 node scripts/verify-release.mjs
-npm run test:signature -- --signed release/Wireframe-Studio-Setup-1.0.7-x64.exe
+npm run test:signature -- --signed release/Wireframe-Studio-Setup-1.0.8-x64.exe
 ```
 
 每个 Release 上传安装器、`.blockmap`、`latest.yml`、`renderer-<version>.zip`、`renderer-update.json` 和 `SHA256SUMS.txt`。私钥须单独备份。轮换公钥需要新桌面运行时，不能静默替换已有安装的信任根。
+
+解包构建位于 `release/native-<version>/win-unpacked`，安装器等分发文件仍位于 `release`。构建新版本不会覆盖正在运行的旧候选目录。
 
 源码公开可查，暂未授予额外开源许可。依赖与 vendored 资源保留各自许可证。Electron 和 Chromium 的第三方许可随安装器提供。

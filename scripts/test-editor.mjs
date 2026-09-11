@@ -53,6 +53,10 @@ const meta = {
   height: 760,
 };
 try {
+  const transparentRun = componentDefinition(makeNode("richtext", {
+    text: "Hidden", runs: [{ text: "Hidden", fontSize: 16, fontWeight: "400", color: "none", italic: false, underline: false }],
+  }));
+  assert.equal(transparentRun.components[0].style.color, "transparent");
   editor.setStyle("body{margin:0}");
   editor.setComponents([
     {
@@ -468,28 +472,241 @@ async function browserSymbolChecks() {
   } finally { ed.destroy(); host.remove(); }
 }
 
+async function browserColorPickerSetup(withPositioning = false) {
+  console.info(`Color picker check: setup ${withPositioning ? "fixed" : "baseline"}`);
+  await import("/app/globals.css");
+  const { default: grapes } = await import("/node_modules/grapesjs/dist/grapes.mjs");
+  const check = (condition, message) => { if (!condition) throw Error(message); };
+  const settle = () => new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(Error("Color picker animation frames stalled")), 5000);
+    requestAnimationFrame(() => requestAnimationFrame(() => { clearTimeout(timer); resolve(); }));
+  });
+  const root = document.createElement("div");
+  root.className = "studio grapes-studio";
+  root.innerHTML = '<header class="app-header">Isolated color picker check</header><div class="editor-layout"><aside class="left-panel"></aside><section class="canvas-section"><div class="grapes-canvas-host"><div class="grapes-mount"></div></div></section><aside class="right-panel mobile-open"><div class="panel-tabs">Styles</div><div class="native-styles"></div></aside></div>';
+  document.body.appendChild(root);
+  const panel = root.querySelector(".right-panel"), styleHost = root.querySelector(".native-styles");
+  const positioning = withPositioning
+    ? (await import("/lib/color-picker-positioning.ts")).createColorPickerPositioning(styleHost, grapes.$)
+    : null;
+  const editor = grapes.init({
+    container: root.querySelector(".grapes-mount"), height: "100%", width: "auto", storageManager: false,
+    telemetry: false, cssIcons: "", panels: { defaults: [] }, avoidInlineStyle: true,
+    colorPicker: positioning?.options,
+    styleManager: { appendTo: styleHost, sectors: [
+      { id: "geometry", name: "位置与尺寸", open: true, properties: ["position", "left", "top", "width", "height", "z-index"] },
+      { id: "type", name: "文字", open: true, properties: ["font-size", "font-weight", "line-height", "text-align", { property: "color", type: "color", name: "文字颜色" }, { property: "-webkit-text-stroke-color", type: "color", name: "文字描边颜色" }] },
+      { id: "appearance", name: "外观", open: true, properties: [{ property: "background-color", type: "color", name: "填充" }, "border-radius", "border-width", { property: "border-color", type: "color", name: "描边颜色" }, "border-style", "opacity"] },
+      { id: "layout", name: "容器布局", open: true, properties: ["display", "flex-direction", "gap", "padding", "justify-content", "align-items"] },
+    ] },
+  });
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(Error("Color picker fixture load exceeded 15 seconds")), 15000);
+    editor.on("load", () => { clearTimeout(timer); resolve(); });
+  });
+  console.info("Color picker check: editor loaded");
+  const component = editor.getWrapper().append({ type: "text", components: [{ type: "textnode", content: "Color fixture" }], style: { width: "320px", height: "160px", color: "#147d67", "background-color": "#f2f4f6", "border-color": "#39424c", "-webkit-text-stroke-color": "#253546", "border-width": "2px", "border-style": "solid" } })[0];
+  editor.select(component);
+  await settle();
+  const anchorFor = (property) => {
+    const anchor = styleHost.querySelector(`.gjs-sm-property__${property} .gjs-field-color-picker`);
+    check(anchor, `Missing ${property} color control`);
+    return anchor;
+  };
+  const popupFor = (anchor) => grapes.$(anchor).spectrum("container")[0];
+  const rect = element => { const r = element.getBoundingClientRect(); return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height }; };
+  let activeProperty = "background-color";
+  const snapshot = () => {
+    const anchor = anchorFor(activeProperty), popup = popupFor(anchor), a = rect(anchor), p = rect(popup);
+    const placement = popup.getAttribute("data-placement");
+    const side = placement?.split("-")[0];
+    return { property: activeProperty, viewport: [innerWidth, innerHeight], scrollTop: panel.scrollTop,
+      anchor: a, popup: p, popupPosition: getComputedStyle(popup).position,
+      placement,
+      visible: !popup.classList.contains("sp-hidden") && getComputedStyle(popup).visibility !== "hidden",
+      outsideViewport: p.left < 0 || p.top < 0 || p.right > innerWidth || p.bottom > innerHeight,
+      edgeGap: side === "left" ? Math.abs(p.right - a.left) : side === "right" ? Math.abs(p.left - a.right)
+        : Math.min(Math.abs(p.top - a.bottom), Math.abs(p.bottom - a.top)) };
+  };
+  const open = async (property = "background-color", fraction = 0.5) => {
+    activeProperty = property;
+    const anchor = anchorFor(property), a = rect(anchor), p = rect(panel);
+    const visibleTop = Math.max(0, p.top), visibleBottom = Math.min(innerHeight, p.bottom);
+    panel.scrollTop += a.top - (visibleTop + (visibleBottom - visibleTop) * fraction);
+    await settle();
+    grapes.$(anchor).spectrum("show");
+    await settle();
+    return snapshot();
+  };
+  const assertPosition = async () => {
+    await settle();
+    const position = snapshot();
+    check(position.visible, `${activeProperty} popup must be visible`);
+    check(!position.outsideViewport, `${activeProperty} popup must stay in the viewport: ${JSON.stringify(position)}`);
+    check(position.popupPosition === "fixed", "The body portal must use viewport coordinates");
+    check(position.edgeGap <= 4.1, `${activeProperty} popup must remain attached to its trigger`);
+    return position;
+  };
+  const drag = async (fraction) => {
+    const field = popupFor(anchorFor(activeProperty)).querySelector(".sp-color");
+    const r = rect(field), x = r.left + r.width * fraction, y = r.top + r.height * 0.35;
+    field.dispatchEvent(new MouseEvent("mousedown", { clientX: x, clientY: y, button: 0, buttons: 1, bubbles: true }));
+    document.dispatchEvent(new MouseEvent("mousemove", { clientX: x, clientY: y, button: 0, buttons: 1, bubbles: true }));
+    document.dispatchEvent(new MouseEvent("mouseup", { clientX: x, clientY: y, button: 0, bubbles: true }));
+    await settle();
+    return component.getStyle()[activeProperty];
+  };
+  const interactions = async () => {
+    const results = [];
+    for (const property of ["color", "background-color", "border-color", "-webkit-text-stroke-color"]) {
+      const initial = component.getStyle()[property];
+      await open(property);
+      const position = await assertPosition();
+      const preview = await drag(0.22);
+      check(preview !== initial, `${property} drag must preview a changed color`);
+      popupFor(anchorFor(property)).querySelector(".sp-cancel").click();
+      await settle();
+      check(component.getStyle()[property] === initial && !snapshot().visible, `${property} cancel must restore the original color`);
+      await open(property);
+      const committed = await drag(0.67);
+      popupFor(anchorFor(property)).querySelector(".sp-choose").click();
+      await settle();
+      check(component.getStyle()[property] === committed && !snapshot().visible, `${property} OK must commit the previewed color`);
+      await open(property);
+      await drag(0.12);
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", keyCode: 27, bubbles: true }));
+      await settle();
+      check(component.getStyle()[property] === committed && !snapshot().visible, `${property} Escape must cancel the preview`);
+      await open(property);
+      const clickoutCommitted = await drag(0.82);
+      document.body.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await settle();
+      check(component.getStyle()[property] === clickoutCommitted && !snapshot().visible, `${property} outside click must retain Spectrum's commit behavior`);
+      results.push({ property, position, initial, preview, committed, clickoutCommitted, cancelRestored: true, escapeRestored: true });
+      console.info(`Color picker check: ${property} commit/cancel passed`);
+    }
+    await open("background-color", 0.4);
+    const beforeScroll = await assertPosition();
+    panel.scrollTop += 48;
+    const afterScroll = await assertPosition();
+    check(Math.abs(afterScroll.popup.top - beforeScroll.popup.top + afterScroll.scrollTop - beforeScroll.scrollTop) < 0.1, "A scrolling right panel must move the open popup with its trigger");
+    const saved = component.getStyle()["background-color"];
+    await drag(0.1);
+    panel.scrollTop = 0;
+    await settle();
+    check(!snapshot().visible && component.getStyle()["background-color"] === saved, "Scrolling the trigger out of view must dismiss and cancel its preview");
+    await open("background-color", 0.5);
+    return { colors: results, beforeScroll, afterScroll, hiddenTriggerCancelled: true };
+  };
+  const edges = async () => {
+    const results = [];
+    for (const fraction of [0.02, 0.5, 0.94]) {
+      await open("background-color", fraction);
+      results.push(await assertPosition());
+    }
+    return results;
+  };
+  const shorthandProbe = async () => {
+    grapes.$(anchorFor(activeProperty)).spectrum("hide");
+    const prototype = editor.getWrapper().append({ style: { width: "120px", height: "60px", background: "#0645B9", border: "3px solid #FFFFFF" } })[0];
+    editor.select(prototype);
+    await settle();
+    const computed = prototype.getEl().ownerDocument.defaultView.getComputedStyle(prototype.getEl());
+    const result = {
+      style: prototype.getStyle(),
+      computed: { backgroundColor: computed.backgroundColor, borderTopColor: computed.borderTopColor, borderTopWidth: computed.borderTopWidth },
+      fields: Object.fromEntries(["background-color", "border-color"].map(property => [property, {
+        modelValue: editor.StyleManager.getProperty("appearance", property).getValue({ noDefault: true }),
+        inputValue: styleHost.querySelector(`.gjs-sm-property__${property} input`).value,
+      }])),
+    };
+    check(result.computed.backgroundColor === "rgb(6, 69, 185)" && result.computed.borderTopColor === "rgb(255, 255, 255)", "Shorthand prototype must render its actual source colors");
+    prototype.remove();
+    const { componentDefinition } = await import("/lib/editor-library.ts");
+    const { makeNode } = await import("/lib/wireframe.ts");
+    const recognized = editor.getWrapper().append(componentDefinition(makeNode("frame", {
+      fill: "#0645B9", stroke: "#FFFFFF", strokeWidth: 3, origin: "detected", reviewed: false,
+    })))[0];
+    editor.select(recognized);
+    await settle();
+    result.recognizedFields = Object.fromEntries(["background-color", "border-color"].map(property => [property, {
+      modelValue: editor.StyleManager.getProperty("appearance", property).getValue({ noDefault: true }),
+      inputValue: styleHost.querySelector(`.gjs-sm-property__${property} input`).value,
+    }]));
+    for (const [property, expected] of [["background-color", "#0645B9"], ["border-color", "#FFFFFF"]]) {
+      check(result.recognizedFields[property].modelValue.toUpperCase() === expected, `${property} must expose recognized colors in the style model`);
+      check(result.recognizedFields[property].inputValue.toUpperCase() === expected, `${property} must display recognized colors in the input`);
+    }
+    editor.select(component); recognized.remove();
+    await settle();
+    console.info("Color picker check: shorthand fields " + JSON.stringify(result));
+    return result;
+  };
+  window.__colorPickerTest = {
+    open, snapshot, settle, panel, component, editor, anchorFor, popupFor, assertPosition, interactions, edges, shorthandProbe, drag,
+    async destroy() {
+      for (const anchor of styleHost.querySelectorAll(".gjs-field-color-picker")) grapes.$(anchor).spectrum("hide");
+      positioning?.destroy(); editor.destroy(); root.remove(); delete window.__colorPickerTest;
+    },
+  };
+  return open();
+}
+
 if (process.versions.electron && process.env.WIREFRAME_SYMBOL_TEST_URL) {
   const { app, BrowserWindow } = await import("electron");
   // Electron emits ready after its entry module finishes evaluating.
   void (async () => {
   const { writeFile } = await import("node:fs/promises");
   const path = await import("node:path");
-  app.setName("Wireframe Isolated Symbol Check");
+  const colors = process.env.WIREFRAME_EDITOR_CHECK === "colors";
+  app.setName(colors ? "Wireframe Isolated Color Picker Check" : "Wireframe Isolated Symbol Check");
   app.setPath("userData", process.env.WIREFRAME_SYMBOL_TEST_DATA);
   try {
     await app.whenReady();
     console.log("Symbol browser check: Electron ready");
-    const window = new BrowserWindow({ show: false, width: 900, height: 600, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
+    const window = new BrowserWindow({ show: false, width: colors ? 1360 : 900, height: colors ? 740 : 600, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, offscreen: colors } });
+    if (colors) window.webContents.setFrameRate(60);
     window.webContents.on("console-message", (details) => {
-      if (details.level === "error" || details.message.startsWith("Symbol browser check:")) console.log(details.message);
+      if (details.level === "error" || details.message.startsWith("Symbol browser check:") || details.message.startsWith("Color picker check:")) console.log(details.message);
     });
     await window.loadURL(process.env.WIREFRAME_SYMBOL_TEST_URL);
     console.log("Symbol browser check: fixture page loaded");
+    const dir = process.env.WIREFRAME_SYMBOL_TEST_ARTIFACTS;
+    if (colors) {
+      const baseline = await window.webContents.executeJavaScript(`(${browserColorPickerSetup.toString()})(false)`);
+      await writeFile(path.join(dir, "color-picker-baseline.png"), (await window.webContents.capturePage()).toPNG());
+      await window.webContents.executeJavaScript("window.__colorPickerTest.destroy()");
+      assert.equal(baseline.outsideViewport, true, "The original scrolled style panel must reproduce the misplaced popup");
+      const fixed = await window.webContents.executeJavaScript(`(${browserColorPickerSetup.toString()})(true)`);
+      const interactions = await window.webContents.executeJavaScript("window.__colorPickerTest.interactions()");
+      const shorthand = await window.webContents.executeJavaScript("window.__colorPickerTest.shorthandProbe()");
+      const resizing = await window.webContents.executeJavaScript("(async () => { const t = window.__colorPickerTest; await t.open('background-color', 0.35); const original = t.component.getStyle()['background-color']; const preview = await t.drag(0.47); return { original, preview, position: t.snapshot() }; })()");
+      window.setContentSize(1120, 740);
+      const liveResize = await window.webContents.executeJavaScript("window.__colorPickerTest.assertPosition()");
+      assert.equal(await window.webContents.executeJavaScript("window.__colorPickerTest.component.getStyle()['background-color']"), resizing.preview);
+      window.webContents.setZoomFactor(1.25);
+      const liveZoom = await window.webContents.executeJavaScript("window.__colorPickerTest.assertPosition()");
+      assert.equal(await window.webContents.executeJavaScript("window.__colorPickerTest.component.getStyle()['background-color']"), resizing.preview);
+      await window.webContents.executeJavaScript("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true })); window.__colorPickerTest.settle()");
+      assert.equal(await window.webContents.executeJavaScript("window.__colorPickerTest.component.getStyle()['background-color']"), resizing.original);
+      const viewports = [];
+      for (const [width, height, zoom] of [[1120, 740, 1], [1120, 740, 1.25], [760, 580, 1], [420, 680, 1], [640, 480, 1.5]]) {
+        window.setContentSize(width, height);
+        window.webContents.setZoomFactor(zoom);
+        const positions = await window.webContents.executeJavaScript("window.__colorPickerTest.edges()");
+        viewports.push({ window: [width, height], zoom, positions });
+        await writeFile(path.join(dir, `color-picker-${width}x${height}-${zoom}.png`), (await window.webContents.capturePage()).toPNG());
+      }
+      await writeFile(path.join(dir, "color-picker-position.json"), JSON.stringify({ baseline, fixed, interactions, shorthand, resizing, liveResize, liveZoom, viewports }, null, 2));
+      await window.webContents.executeJavaScript("window.__colorPickerTest.destroy()");
+      assert.equal(await window.webContents.executeJavaScript("document.querySelectorAll('.wireframe-color-picker').length"), 0);
+      console.log(JSON.stringify({ status: "PASS", baseline, fixed, shorthand, colorControls: interactions.colors.map(item => item.property), viewports: viewports.map(item => ({ window: item.window, zoom: item.zoom, visiblePositions: item.positions.length })), scrollTracked: true, openPopupResized: true, openPopupZoomed: true, previewSurvivedResize: true, cancelAndEscapeRestored: true, hiddenTriggerCancelled: true, cleanedUp: true, artifacts: dir, isolatedUserData: true, visibleWindows: 0 }));
+      window.destroy(); app.exit(0); return;
+    }
     const result = await window.webContents.executeJavaScript(`(${browserSymbolChecks.toString()})()`);
     const ts = (await import("typescript")).default;
     const compiled = ts.transpileModule(result.react, { compilerOptions: { jsx: ts.JsxEmit.ReactJSX }, reportDiagnostics: true });
     assert.equal((compiled.diagnostics || []).filter(d => d.category === ts.DiagnosticCategory.Error).length, 0);
-    const dir = process.env.WIREFRAME_SYMBOL_TEST_ARTIFACTS;
     for (const [name, data] of Object.entries({ "symbols.png": Buffer.from(result.pngBase64, "base64"), "symbols.svg": result.svg, "symbols.html": result.html, "Wireframe.tsx": result.react, "hearts-layout.json": JSON.stringify({ layout: result.hearts, pngInk: result.heartPixels, fitChecks: result.fitChecks }, null, 2) }))
       await writeFile(path.join(dir, name), data);
     window.destroy();
@@ -497,7 +714,7 @@ if (process.versions.electron && process.env.WIREFRAME_SYMBOL_TEST_URL) {
     app.exit(0);
   } catch (error) { console.error(error); app.exit(1); }
   })().catch(error => { console.error(error); app.exit(1); });
-} else if (process.argv.includes("--browser")) {
+} else if (process.argv.includes("--browser") || process.argv.includes("--color-picker")) {
   const { createServer } = await import("vite");
   const { spawn } = await import("node:child_process");
   const { mkdir, mkdtemp, rm } = await import("node:fs/promises");
@@ -508,7 +725,8 @@ if (process.versions.electron && process.env.WIREFRAME_SYMBOL_TEST_URL) {
   const prefix = "wireframe-symbol-test-";
   const data = await mkdtemp(path.join(tmpdir(), prefix));
   await mkdir(path.join(root, "work"), { recursive: true });
-  const artifacts = await mkdtemp(path.join(root, "work", "symbol-export-"));
+  const colors = process.argv.includes("--color-picker");
+  const artifacts = await mkdtemp(path.join(root, "work", colors ? "color-picker-check-" : "symbol-export-"));
   const server = await createServer({ configFile: false, root, publicDir: false, appType: "custom", logLevel: "warn", optimizeDeps: { noDiscovery: true, include: ["fflate", "html-to-image"] }, server: { host: "127.0.0.1", port: 0, watch: null } });
   server.middlewares.use((request, response, next) => {
     if (request.url !== "/__symbol_check.html") return next();
@@ -518,7 +736,7 @@ if (process.versions.electron && process.env.WIREFRAME_SYMBOL_TEST_URL) {
   try {
     await server.listen();
     const electron = (await import("electron")).default;
-    const env = { ...process.env, WIREFRAME_SYMBOL_TEST_DATA: data, WIREFRAME_SYMBOL_TEST_ARTIFACTS: artifacts, WIREFRAME_SYMBOL_TEST_URL: `${server.resolvedUrls.local[0]}__symbol_check.html` };
+    const env = { ...process.env, WIREFRAME_EDITOR_CHECK: colors ? "colors" : "symbols", WIREFRAME_SYMBOL_TEST_DATA: data, WIREFRAME_SYMBOL_TEST_ARTIFACTS: artifacts, WIREFRAME_SYMBOL_TEST_URL: `${server.resolvedUrls.local[0]}__symbol_check.html` };
     delete env.ELECTRON_RUN_AS_NODE;
     await new Promise((resolve, reject) => {
       const child = spawn(electron, [fileURLToPath(import.meta.url)], { cwd: root, env, stdio: "inherit", windowsHide: true });

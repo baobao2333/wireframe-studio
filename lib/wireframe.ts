@@ -14,6 +14,8 @@ export const nodeSchema = z.object({
   fontWeight: z.enum(["400", "500", "600", "700"]), align: z.enum(["left", "center", "right"]),
   lineHeight: z.number().finite().min(1).max(3), fill: color, stroke: color, color,
   radius: z.number().min(0).max(3000), strokeWidth: z.number().min(0).max(12),
+  textStroke: color.optional(), textStrokeWidth: z.number().finite().min(0).max(12).optional(),
+  textLayout: z.enum(["wrap", "source-lines"]).optional(),
   priority: z.enum(["primary", "secondary", "tertiary"]), parentId: z.string().max(100).nullable(),
   note: z.string().max(10000), locked: z.boolean(), hidden: z.boolean(),
   origin: z.enum(["manual", "detected"]), reviewed: z.boolean(), confidence: z.number().min(0).max(100).nullable(),
@@ -83,15 +85,16 @@ export type RecognitionResult = {
   summary: string;
   width: number;
   height: number;
+  background: string;
   nodes: Record<string, unknown>[];
 };
 
 export function recognitionProject(result: RecognitionResult, reference: Project["reference"], targetWidth: number): Project {
   const project = {
-    ...blankProject(), name: result.title, width: result.width, height: result.height,
+    ...blankProject(), name: result.title, width: result.width, height: result.height, background: result.background,
     notes: result.summary, reference,
     nodes: result.nodes.map((node) => makeNode(node.type as Kind, {
-      ...node, origin: "detected", reviewed: false, locked: false, hidden: false, strokeWidth: 1,
+      ...node, origin: "detected", reviewed: false, locked: false, hidden: false,
     })),
   };
   let checked: Project;

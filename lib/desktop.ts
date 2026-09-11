@@ -57,6 +57,7 @@ export type VisionJob = {
     summary: string;
     width: number;
     height: number;
+    background: string;
     nodes: Record<string, unknown>[];
   };
 };

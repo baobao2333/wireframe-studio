@@ -3,6 +3,7 @@ import {
   type Project,
 } from "./wireframe";
 import { desktop, type VisionJob, type VisionProgress } from "./desktop";
+import { refineRecognitionDraft } from "./recognition-refinement";
 type ImageInput = { src: string; name: string; width: number; height: number };
 export type ModelProgress = VisionProgress & {
   state: "running" | "complete" | "cancelled" | "failed";
@@ -99,7 +100,10 @@ export async function modelImage(
       if (job.status === "failed") throw Error(job.error);
       if (job.status === "cancelled") throw Error("识别已取消");
       if (job.status === "done") {
-        const project = recognitionProject(job.result, image, width);
+        const checked = recognitionProject(job.result, image, width);
+        report({ message: "正在校准原图色彩与文字排版" });
+        const project = await refineRecognitionDraft(checked, signal);
+        if (signal.aborted) throw Error("已取消识别");
         report({ stage: "complete", state: "complete", message: "识别与校验已完成", nodeCount: project.nodes.length });
         return project;
       }

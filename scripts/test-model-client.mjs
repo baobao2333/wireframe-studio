@@ -9,17 +9,18 @@ import * as wireframe from "../lib/wireframe.ts";
 const require=createRequire(import.meta.url);
 const transpile=async path=>ts.transpileModule(await readFile(new URL(path,import.meta.url),"utf8"),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText;
 const compiled=await transpile("../lib/model-client.ts");
-function client(api){
+function client(api,refine=async project=>project){
   const exports={};
   new Function("require","exports","setTimeout","clearTimeout",compiled)(name=>{
     if(name==="./desktop")return {desktop:api};
     if(name==="./wireframe")return wireframe;
+    if(name==="./recognition-refinement")return {refineRecognitionDraft:refine};
     throw Error(`Unexpected import: ${name}`);
   },exports,(fn,ms)=>setTimeout(fn,ms===1500?0:ms),clearTimeout);
   return exports.modelImage;
 }
 const image={src:"data:image/png;base64,aW1hZ2U=",name:"fixture.png",width:703,height:1193};
-const result={title:"Fixture",summary:"Draft",width:703,height:1193,nodes:[wireframe.makeNode("progress",{value:0.78,text:"78%"})]};
+const result={title:"Fixture",summary:"Draft",width:703,height:1193,background:"#147d67",nodes:[wireframe.makeNode("progress",{value:0.78,text:"78%"})]};
 const telemetry={stage:"recognizing",activityAgeMs:46000,eventCount:2,outputChars:0,nodeCount:null,timeoutMs:300000,warning:null};
 const done={status:"done",message:"Result file ready",elapsed:47000,result,error:null,progress:{...telemetry,stage:"complete",nodeCount:1,outputChars:JSON.stringify(result).length}};
 let passed=0;
@@ -44,6 +45,22 @@ await test("invalid recognized values never report completion",async()=>{
   await assert.rejects(model(image,703,new AbortController().signal,event=>seen.push(event)),/value=78/);
   assert.equal(seen.at(-1).state,"failed");
   assert.ok(seen.every(event=>event.stage!=="complete"));
+});
+await test("refinement failures remain visible and cannot complete the draft",async()=>{
+  const seen=[];
+  const model=client({visionStart:async()=>({id:"refine-failure"}),visionGet:async()=>done},async()=>{throw Error("Source color sampling unavailable");});
+  await assert.rejects(model(image,703,new AbortController().signal,event=>seen.push(event)),/Source color sampling unavailable/);
+  assert.ok(seen.some(event=>event.message.includes("原图色彩")));
+  assert.ok(seen.every(event=>event.state!=="complete"));
+});
+await test("cancelling during draft refinement cannot apply its late result",async()=>{
+  const controller=new AbortController(),seen=[];
+  let cancelled=0;
+  const model=client({visionStart:async()=>({id:"refine-cancel"}),visionGet:async()=>done,visionCancel:async()=>{cancelled++;}},async project=>{controller.abort();return project;});
+  await assert.rejects(model(image,703,controller.signal,event=>seen.push(event)),/已取消/);
+  assert.equal(cancelled,1);
+  assert.equal(seen.at(-1).state,"cancelled");
+  assert.ok(seen.every(event=>event.state!=="complete"));
 });
 await test("pre-aborted requests never launch Codex",async()=>{
   const controller=new AbortController();controller.abort();

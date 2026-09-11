@@ -58,8 +58,8 @@
 .import-dialog .image-drop:disabled { opacity:1;cursor:default; }
 .image-file-label>.image-file-name { min-width:0;margin:0;overflow:hidden;text-overflow:ellipsis;font-size:12px;color:#717782; }
 .image-file-label>.image-file-dimensions { flex-shrink:0; }
-.icon-picker-grid { display:grid;grid-template-columns:repeat(6,32px);gap:4px; }
-.icon-picker-grid .icon-button { width:32px;min-width:32px;height:32px; }
+.icon-picker-grid { display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:4px;width:100%;max-width:212px; }
+.icon-picker-grid .icon-button { width:100%;min-width:0;height:32px; }
 .icon-mode-tabs { width:100%; }
 .icon-mode-tabs>* { flex:1;min-width:0; }
 .symbol-input { min-width:0;font-size:22px;font-family:Arial,"Microsoft YaHei","Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji","Segoe UI Symbol",sans-serif; }
@@ -68,6 +68,9 @@
 .icon-color-row { display:flex;align-items:center;justify-content:space-between;gap:8px; }
 .icon-color-row input[type=color] { width:32px;height:28px;flex:none;padding:2px; }
 .icon-overflow-warning { display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px;color:#956919;font-size:12px;line-height:1.5; }
+.wireframe-color-picker { position:fixed!important;max-width:calc(100vw - 16px);max-height:calc(100dvh - 16px);overflow:auto; }
+.wireframe-color-picker:not([data-positioned=true]) { visibility:hidden; }
+.wireframe-color-picker .sp-picker-container { padding-bottom:10px;margin-bottom:0; }
 .icon-overflow-warning>span { min-width:0;overflow-wrap:anywhere; }
 @media(max-height:780px) { .import-dialog .image-drop.has-image { height:150px; } }
 @media(max-width:480px) { .recognition-steps { grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 14px; }.recognition-activity { gap:6px 14px; }.recognition-service { flex-direction:column;gap:2px; } }

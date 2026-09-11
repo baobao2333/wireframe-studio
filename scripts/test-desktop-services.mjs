@@ -16,7 +16,7 @@ const resultFixture = () => {
   const node = { id: "frame", parentId: null, type: "frame", name: "Panel", x: 0, y: 0, w: 390, h: 800,
     text: "", fontSize: 16, fontWeight: "400", align: "left", lineHeight: 1.5, color: "#202020", fill: "#ffffff",
     stroke: "#cccccc", radius: 0, priority: "primary", note: "", confidence: 95, runs: [], items: [], rows: [], value: 0, icon: "home" };
-  return { title: "Fixture", width: 390, height: 800, summary: "Fixture output", nodes: [node,
+  return { title: "Fixture", width: 390, height: 800, background: "#ffffff", summary: "Fixture output", nodes: [node,
     { ...node, id: "text", parentId: "frame", type: "text", name: "Title", x: 20, y: 20, w: 200, h: 40, text: "Fixture title" }] };
 };
 let passed = 0;
