@@ -19,6 +19,10 @@ import { createVisionService } from "./vision-service.mjs";
 import { createHotUpdater } from "./hot-update.mjs";
 import { electronFetch } from "./electron-fetch.mjs";
 import { verifyWindowsInstaller, verifyWindowsSignature } from "./windows-signature.mjs";
+import { createControlService } from "./control-service.mjs";
+import { createControlRpc } from "./control-rpc.mjs";
+import { registerCodexControl } from "./control-registration.mjs";
+import { controlTools } from "../control/schema.mjs";
 
 const directory = fileURLToPath(new URL(".", import.meta.url));
 const publisher = JSON.parse(await readFile(join(directory, "publisher.json"), "utf8"));
@@ -40,6 +44,7 @@ app.setName("Wireframe Studio");
 app.setAppUserModelId("com.baobao2333.wireframe-studio");
 if (process.env.WIREFRAME_TEST_USER_DATA)
   app.setPath("userData", resolve(process.env.WIREFRAME_TEST_USER_DATA));
+const hiddenTest = Boolean(process.env.WIREFRAME_TEST_USER_DATA && process.env.WIREFRAME_TEST_HIDDEN === "1");
 protocol.registerSchemesAsPrivileged([
   {
     scheme: "wireframe",
@@ -57,7 +62,7 @@ if (!app.requestSingleInstanceLock()) app.quit();
 else
   void start().catch((error) => {
     console.error(error);
-    dialog.showErrorBox("线框工坊启动失败", error.message);
+    if (!hiddenTest) dialog.showErrorBox("线框工坊启动失败", error.message);
     app.exit(1);
   });
 
@@ -84,9 +89,17 @@ async function start() {
     nativeExpected,
     nativeDownloaded;
   const send = (channel, value) => {
-    if (window && !window.isDestroyed())
+    if (window && !window.isDestroyed() && !window.webContents.isDestroyed())
       window.webContents.send(channel, value);
   };
+  const controlRpc = createControlRpc({ send: value => send("control:request", value), isReady: () => rendererIsReady && !rendererCrashed });
+  let control, controlStartupError;
+  try {
+    control = await createControlService({ directory: join(userData, "control"), tools: controlTools,
+      execute: (tool, args) => controlRpc.request(tool, args), onState: value => send("control:state", value) });
+  } catch {
+    controlStartupError = "Codex 控制服务启动失败，请检查本机数据目录后重启应用";
+  }
   await app.whenReady();
   const publisherStatus = app.isPackaged
     ? verifyWindowsSignature(app.getPath("exe"))
@@ -211,6 +224,22 @@ async function start() {
       trusted(event);
       return fn(...args);
     });
+  handle("control:status", () => control?.status() || { enabled: false, ready: false, connected: false, busy: false, error: controlStartupError });
+  handle("control:configure", enabled => {
+    if (!control) throw Error(controlStartupError);
+    return control.configure(enabled);
+  });
+  handle("control:connect", async () => {
+    if (!app.isPackaged) throw Error("请在已安装的线框工坊中连接 Codex");
+    if (!control || !rendererIsReady) throw Error("请先等待工程载入完成");
+    await registerCodexControl(app.getPath("exe"), join(app.getAppPath(), "control/entry.mjs"));
+    await control.configure(true);
+    return control.status();
+  });
+  handle("control:result", (id, result) => {
+    if (typeof id !== "string") throw Error("控制响应标识无效");
+    return controlRpc.reply(id, result);
+  });
   async function openProjectPath(path) {
     const size = (await stat(path)).size;
     if (size > 32 * 1024 * 1024) throw Error("工程文件超过 32 MB");
@@ -361,6 +390,8 @@ async function start() {
   }
   async function reloadRenderer() {
     rendererIsReady = false;
+    control?.setReady(false);
+    controlRpc.reset();
     clearTimeout(bootTimer);
     if (hot.getState().pending)
       bootTimer = setTimeout(
@@ -423,6 +454,8 @@ async function start() {
     await storage.flush();
     await storage.backup();
     await vision.dispose();
+    controlRpc.reset();
+    await control?.dispose();
     allowClose = true;
     autoUpdater.quitAndInstall(false, true);
   });
@@ -443,6 +476,7 @@ async function start() {
       clearTimeout(bootTimer);
       rendererCrashed = false;
       rendererIsReady = true;
+      control?.setReady(true);
       await deliverOpen();
     } catch (e) {
       console.error(e);
@@ -452,6 +486,8 @@ async function start() {
     try {
       await storage.flush();
       await vision.dispose();
+      controlRpc.reset();
+      await control?.dispose();
       allowClose = true;
       app.quit();
     } catch (e) {
@@ -573,6 +609,8 @@ async function start() {
       webSecurity: true,
       webviewTag: false,
       spellcheck: false,
+      backgroundThrottling: !hiddenTest,
+      offscreen: hiddenTest,
     },
   });
   if (process.env.WIREFRAME_TEST_TITLE) {
@@ -591,6 +629,8 @@ async function start() {
   });
   window.webContents.on("render-process-gone", () => {
     rendererCrashed = true;
+    control?.setReady(false);
+    controlRpc.reset();
     if (hot.getState().pending)
       void recoverRenderer("界面进程异常退出，已恢复上一版本");
     else
@@ -599,7 +639,7 @@ async function start() {
         "请重新启动应用，最近一次成功保存的工程保留在本机。",
       );
   });
-  window.once("ready-to-show", () => window.show());
+  window.once("ready-to-show", () => { if (!hiddenTest) window.show(); });
   window.on("close", (event) => {
     if (!allowClose) {
       event.preventDefault();

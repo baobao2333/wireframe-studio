@@ -33,5 +33,11 @@ contextBridge.exposeInMainWorld(
     closeReady: () => ipcRenderer.send("renderer:close-ready"),
     onCommand: (callback) => listen("app:command", callback),
     onUpdate: (callback) => listen("update:state", callback),
+    controlStatus: () => call("control:status"),
+    controlConfigure: (enabled) => call("control:configure", enabled),
+    controlConnect: () => call("control:connect"),
+    controlResult: (id, result) => call("control:result", id, result),
+    onControlRequest: (callback) => listen("control:request", callback),
+    onControlState: (callback) => listen("control:state", callback),
   }),
 );

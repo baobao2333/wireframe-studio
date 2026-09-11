@@ -73,8 +73,10 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { get, set } from "@/lib/storage";
-import { desktop, copyText, type OpenedProject } from "@/lib/desktop";
+import { desktop, copyText, type OpenedProject, type CodexControlState, type CodexControlRequest } from "@/lib/desktop";
 import { DesktopSettings } from "./desktop-settings";
+import { CodexControlPanel } from "./codex-control-panel";
+import { createCodexController } from "@/lib/codex-control";
 import { createColorPickerPositioning } from "@/lib/color-picker-positioning";
 import appIcon from "@/assets/app.png?url";
 import { toast, Toaster } from "sonner";
@@ -324,6 +326,7 @@ export default function GrapesStudio() {
     styleHost = useRef<HTMLDivElement>(null),
     traitHost = useRef<HTMLDivElement>(null),
     editor = useRef<Editor | null>(null),
+    codexController = useRef<ReturnType<typeof createCodexController> | null>(null),
     fileRef = useRef<HTMLInputElement>(null);
   const [ready, setReady] = useState(false),
     [initError, setInitError] = useState(""),
@@ -356,6 +359,7 @@ export default function GrapesStudio() {
       path: string;
     } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [controlState, setControlState] = useState<CodexControlState | null>(null);
   const canSave = useRef(false),
     sequence = useRef(0),
     panning = useRef<{ x: number; y: number; cx: number; cy: number } | null>(
@@ -813,6 +817,17 @@ export default function GrapesStudio() {
             );
           }
           canSave.current = true;
+          if (desktop?.onControlRequest) {
+            codexController.current?.dispose();
+            codexController.current = createCodexController(ed, {
+              getMeta: () => metaRef.current,
+              setMeta: next => { metaRef.current = next; setMeta(next); },
+              persist: flushProject,
+              canExecute: () => canSave.current && !ed.getEditing() &&
+                !document.querySelector('[role="dialog"]') &&
+                !document.activeElement?.matches('input,textarea,[contenteditable="true"]'),
+            });
+          }
           setSaved("已存到本机");
           persist();
           ed.UndoManager.clear();
@@ -846,6 +861,8 @@ export default function GrapesStudio() {
       alive = false;
       resize?.disconnect();
       canSave.current = false;
+      codexController.current?.dispose();
+      codexController.current = null;
       colorPositioning?.destroy();
       editor.current?.destroy();
       editor.current = null;
@@ -919,6 +936,32 @@ export default function GrapesStudio() {
   const handleProject = useEffectEvent((file: OpenedProject) => {
     void nativeOpen(file);
   });
+  const handleControl = useEffectEvent(async (request: CodexControlRequest) => {
+    let result: Record<string, unknown>;
+    if (!codexController.current || Date.now() > request.deadline) {
+      result = { ok: false, error: { code: "NOT_READY", message: "工程尚未就绪或命令已过期，请重新读取状态" }, applied: false, saved: false };
+    } else {
+      try {
+        const response = await codexController.current.execute(request.tool, request.args);
+        if (!response || typeof response !== "object" || Array.isArray(response)) throw Error("Invalid control result");
+        result = response;
+      }
+      catch { result = { ok: false, error: { code: "CONTROL_FAILED", message: "控制命令未完成，请先读取当前工程" }, applied: null, saved: false }; }
+    }
+    await desktop!.controlResult(request.id, result);
+  });
+  async function refreshControl() {
+    if (desktop?.controlStatus) setControlState(await desktop.controlStatus());
+  }
+  useEffect(() => {
+    if (!desktop?.onControlRequest) return;
+    const a = desktop.onControlRequest(request => {
+      void handleControl(request).catch(() => toast.error("Codex 控制响应未送达，请读取工程后重试"));
+    });
+    const b = desktop.onControlState(setControlState);
+    void desktop.controlStatus().then(setControlState).catch(() => setControlState({ enabled: false, ready: false, connected: false, busy: false, error: "无法读取本机控制状态" }));
+    return () => { a(); b(); };
+  }, []);
   useEffect(() => {
     if (!desktop) return;
     const a = desktop.onCommand((command) => handleCommand(command));
@@ -1150,6 +1193,11 @@ export default function GrapesStudio() {
               <Download size={16} />
               导出给 Codex
             </button>
+            {desktop && (
+              <CodexControlPanel status={controlState} onRefresh={refreshControl}
+                onConnect={async () => { try { setControlState(await desktop!.controlConnect()); } finally { await refreshControl(); } }}
+                onToggle={async enabled => { try { setControlState(await desktop!.controlConfigure(enabled)); } finally { await refreshControl(); } }} />
+            )}
             {desktop && (
               <Tool label="应用与更新" onClick={() => setSettingsOpen(true)}>
                 <Settings size={17} />

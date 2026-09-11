@@ -62,6 +62,12 @@ export type VisionJob = {
   };
 };
 export type OpenedProject = { name: string; content: string; path: string };
+export type CodexControlState = {
+  enabled: boolean; ready: boolean; connected: boolean; busy: boolean;
+  lastCommand?: { summary: string; at: string; status: "applied" | "failed" };
+  error?: string;
+};
+export type CodexControlRequest = { id: string; deadline: number; tool: string; args: Record<string, unknown> };
 export interface DesktopApi {
   info(): Promise<DesktopInfo>;
   openImage(): Promise<{
@@ -104,6 +110,12 @@ export interface DesktopApi {
   onCommand(listener: (command: string) => void): () => void;
   onProject(listener: (file: OpenedProject) => void): () => void;
   onUpdate(listener: (state: UpdateState) => void): () => void;
+  controlStatus(): Promise<CodexControlState>;
+  controlConfigure(enabled: boolean): Promise<CodexControlState>;
+  controlConnect(): Promise<CodexControlState>;
+  controlResult(id: string, result: Record<string, unknown>): Promise<boolean>;
+  onControlRequest(listener: (request: CodexControlRequest) => void): () => void;
+  onControlState(listener: (state: CodexControlState) => void): () => void;
 }
 declare global {
   interface Window {

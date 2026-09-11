@@ -15,6 +15,7 @@ module.exports = {
     "desktop/update-public-key.pem",
     "desktop/verify-signature.ps1",
     "server/vision-schema.mjs",
+    "control/*.mjs",
     "renderer/**/*",
     "package.json",
     "!**/.release-secrets/**",

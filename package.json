@@ -1,6 +1,6 @@
 {
   "name": "wireframe-studio",
-  "version": "1.0.8",
+  "version": "1.1.0",
   "private": true,
   "description": "Desktop wireframe editor with local Codex vision, reusable components and verified updates",
   "author": "baobao2333",
@@ -22,9 +22,10 @@
     "package": "npm run build && node scripts/package-desktop.mjs",
     "package:signed": "npm run build && node scripts/package-desktop.mjs --signed",
     "start": "node scripts/run-desktop.mjs",
-    "test": "node scripts/test-core.mjs && node scripts/test-editor.mjs && node scripts/test-hot-update.mjs && node scripts/test-desktop-services.mjs && node scripts/test-model-client.mjs && node scripts/test-recognition-colors.mjs",
+    "test": "node scripts/test-core.mjs && node scripts/test-editor.mjs && node scripts/test-hot-update.mjs && node scripts/test-desktop-services.mjs && node scripts/test-model-client.mjs && node scripts/test-recognition-colors.mjs && node scripts/test-codex-control.mjs && node scripts/test-control-service.mjs",
     "pretest:desktop": "node scripts/prepare-ocr.mjs",
     "test:desktop": "node scripts/test-ocr-worker.mjs && node scripts/test-electron-fetch.mjs && node scripts/test-recognition-fidelity.mjs",
+    "test:control": "node scripts/test-codex-control.mjs --browser && node scripts/test-control-app.mjs",
     "test:signature": "node scripts/test-windows-signature.mjs",
     "lint": "eslint .",
     "db:generate": "drizzle-kit generate"
@@ -33,6 +34,7 @@
     "@base-ui/react": "^1.7.0",
     "@floating-ui/dom": "1.8.0",
     "@hookform/resolvers": "^5.7.1",
+    "@modelcontextprotocol/sdk": "1.30.0",
     "@shadcn/react": "^0.3.0",
     "@techstark/opencv-js": "^5.0.0-release.1",
     "@tesseract.js-data/chi_sim": "^1.0.0",

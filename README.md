@@ -18,6 +18,16 @@ Windows 桌面线框编辑器。用户定义信息层级、字号、对齐和组
 - 打开 `.wireframe` 和兼容 JSON；当前工程与组件库自动保存到当前 Windows 用户的应用数据目录。原浏览器版数据不会自动迁移，可先导出 `project.json` 再在桌面版打开。
 - 导出 ZIP 包含 PNG、SVG、HTML、React TSX、工程 JSON、设计规范和 Codex 交接文本。导出代码是静态界面，不是已完成的业务应用。
 
+## Codex 会话控制
+
+在已安装的应用工具栏打开 Codex 面板，选择连接。应用备份当前 Codex 配置，只添加 `wireframe-studio` 本机 STDIO MCP 服务，不改模型、provider 或其他服务。Codex 重新加载 MCP 配置后，可直接读取当前工程和组件库，按组件 ID 修改文字、富文本、字号、颜色、位置、层级与备注，并增加、复制、删除组件。无需重新识别图片，也不额外调用图片生成模型。
+
+控制默认关闭。面板可随时暂停；关闭应用后不可编辑。修改检查工程版本和锁定状态，拒绝过期请求和正在进行的手工编辑。每批操作占一个原生撤销步骤，自动保存失败会明确返回 `applied=true, saved=false`，不能当作未执行重复提交。自动保存针对应用工程副本，另存的 `.wireframe` 文件仍由用户主动保存。
+
+默认只读取精简结构，不返回原图或 HTML；需要看效果时单独获取 PNG 预览。连接只监听本机，使用每次启停轮换的令牌。配置已存在但指向其他程序时不会覆盖。不要手动公开应用数据目录中的 `control/connection.json`。
+
+控制入口为安装目录中的 `resources/app.asar/control/entry.mjs`，使用应用自身 EXE 和仅对此子进程设置的 `ELECTRON_RUN_AS_NODE=1` 启动。`--codex-control` 从标准输入接收 `{ "tool": "wireframe_get_state", "args": {} }`，向标准输出返回 JSON。写操作需要最新 `expectedRevision` 和唯一 `requestId`；重试同一操作时保持 ID 不变。`--codex-mcp` 是 Codex 配置使用的常驻 STDIO 模式。两种模式均不新开编辑器窗口；Windows GUI 模式不用于 STDIO。
+
 ## 图片识别
 
 默认调用当前用户已安装并登录的本机 Codex，不另保存 API Key。图片会通过 Codex 发送到用户已配置的模型服务，并非纯离线识别；不修改全局模型或 provider 配置。模型使用与额度遵循用户的 Codex 账号和设置。
@@ -51,6 +61,7 @@ npm run test:desktop
 npm run lint
 npx tsc --noEmit
 npm run build
+npm run test:control
 npm start
 npm run package
 ```
@@ -61,9 +72,9 @@ npm run package
 
 ```sh
 npm run package:signed
-node scripts/make-hot-update.mjs --version 1.0.8 --min-app-version 1.0.8 --tag v1.0.8 --output release --private-key .release-secrets/update-private-key.pem --native-path release/Wireframe-Studio-Setup-1.0.8-x64.exe --native-version 1.0.8
+node scripts/make-hot-update.mjs --version 1.1.0 --min-app-version 1.1.0 --tag v1.1.0 --output release --private-key .release-secrets/update-private-key.pem --native-path release/Wireframe-Studio-Setup-1.1.0-x64.exe --native-version 1.1.0
 node scripts/verify-release.mjs
-npm run test:signature -- --signed release/Wireframe-Studio-Setup-1.0.8-x64.exe
+npm run test:signature -- --signed release/Wireframe-Studio-Setup-1.1.0-x64.exe
 ```
 
 每个 Release 上传安装器、`.blockmap`、`latest.yml`、`renderer-<version>.zip`、`renderer-update.json` 和 `SHA256SUMS.txt`。私钥须单独备份。轮换公钥需要新桌面运行时，不能静默替换已有安装的信任根。

@@ -7,7 +7,7 @@ import { parseArgs } from "node:util";
 import semver from "semver";
 
 const projectRoot = path.resolve(import.meta.dirname, "..");
-export const runtimeDependencies = Object.freeze({ "electron-updater": "6.8.9", semver: "7.7.4", fflate: "0.8.3" });
+export const runtimeDependencies = Object.freeze({ "electron-updater": "6.8.9", semver: "7.7.4", fflate: "0.8.3", "@modelcontextprotocol/sdk": "1.30.0", zod: "3.25.76" });
 const repository = "baobao2333/wireframe-studio";
 
 async function regular(filename, kind = "file") {
@@ -113,6 +113,8 @@ export async function stageDesktop({ root = projectRoot, install = true, npmCli 
       if (/\.(mjs|cjs|json|pem)$/i.test(name) || name === "verify-signature.ps1") await copyRuntime(path.join(desktop, name), path.join(temporary, "desktop", name), `desktop/${name}`);
     }
     await copyRuntime(path.join(root, "server/vision-schema.mjs"), path.join(temporary, "server/vision-schema.mjs"), "server/vision-schema.mjs");
+    for (const name of ["schema.mjs", "client.mjs", "mcp-server.mjs", "entry.mjs"])
+      await copyRuntime(path.join(root, "control", name), path.join(temporary, "control", name), `control/${name}`);
     await copyRuntime(renderer, path.join(temporary, "renderer"), "renderer");
     const release = JSON.parse(await readFile(path.join(temporary, "desktop/release.json"), "utf8"));
     if (release.appVersion !== rootPackage.version || release.repository !== repository) {
