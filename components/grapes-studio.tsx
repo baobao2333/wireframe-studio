@@ -65,6 +65,7 @@ import {
 import { get, set } from "@/lib/storage";
 import { desktop, copyText, type OpenedProject } from "@/lib/desktop";
 import { DesktopSettings } from "./desktop-settings";
+import appIcon from "@/assets/app.png?url";
 import { toast, Toaster } from "sonner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -979,7 +980,7 @@ export default function GrapesStudio() {
       <main className="studio grapes-studio">
         <header className="app-header">
           <div className="brand">
-            <Frame size={23} />
+            <img src={appIcon} alt="" width={24} height={24} className="brand-icon"/>
             <h1>线框工坊</h1>
             <span>STUDIO</span>
           </div>

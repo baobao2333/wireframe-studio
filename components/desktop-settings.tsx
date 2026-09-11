@@ -99,7 +99,7 @@ export function DesktopSettings({
           <div>
             <dt>本机 Codex</dt>
             <dd>
-              {info ? (info.codex.available ? "已找到" : "未安装") : "读取中"}
+              {info ? (info.codex.available ? "已登录" : "不可用") : "读取中"}
             </dd>
           </div>
           <div>
@@ -110,7 +110,8 @@ export function DesktopSettings({
             <dt>分发源</dt>
             <dd>baobao2333/wireframe-studio · GitHub Releases</dd>
           </div>
-        </dl>
+      </dl>
+      {info?.codex.error&&<p className="update-warning">{info.codex.error}</p>}
         <section className="update-section">
           <h3>
             <ShieldCheck size={16} />

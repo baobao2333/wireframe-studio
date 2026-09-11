@@ -1,6 +1,6 @@
 {
   "name": "wireframe-studio",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "private": true,
   "description": "Desktop wireframe editor with local Codex vision, reusable components and verified updates",
   "author": "baobao2333",
@@ -22,6 +22,8 @@
     "package": "npm run build && node scripts/package-desktop.mjs",
     "start": "node scripts/run-desktop.mjs",
     "test": "node scripts/test-core.mjs && node scripts/test-editor.mjs && node scripts/test-hot-update.mjs && node scripts/test-desktop-services.mjs",
+    "pretest:desktop": "node scripts/prepare-ocr.mjs",
+    "test:desktop": "node scripts/test-ocr-worker.mjs",
     "lint": "eslint .",
     "db:generate": "drizzle-kit generate"
   },
@@ -41,7 +43,7 @@
     "embla-carousel-react": "^8.6.0",
     "fflate": "^0.8.3",
     "font-awesome": "4.7.0",
-    "grapesjs": "^0.23.6",
+    "grapesjs": "0.23.6",
     "grapesjs-plugin-forms": "^2.0.6",
     "html-to-image": "^1.11.13",
     "idb-keyval": "^6.3.0",

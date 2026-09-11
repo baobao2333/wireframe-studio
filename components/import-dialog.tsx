@@ -211,7 +211,7 @@ export function ImportDialog({
           ) : (
             <div className="model-connection">
               <strong>本机 Codex</strong>
-              <span>当前登录 · 组件树与富文本</span>
+              <span>使用本机账号 · 组件树与富文本</span>
             </div>
           )}
           <label>

@@ -40,6 +40,7 @@ Ed25519 更新签名不等同于 Windows Authenticode。发布私钥不在仓库
 ```sh
 npm ci
 npm test
+npm run test:desktop
 npm run lint
 npx tsc --noEmit
 npm run build
@@ -52,7 +53,7 @@ npm run package
 发布者同步 `package.json` 和 `desktop/release.json` 后构建安装器，再生成签名清单：
 
 ```sh
-node scripts/make-hot-update.mjs --version 1.0.1 --min-app-version 1.0.0 --tag v1.0.1 --output release --private-key .release-secrets/update-private-key.pem --native-path release/Wireframe-Studio-Setup-1.0.1-x64.exe --native-version 1.0.1
+node scripts/make-hot-update.mjs --version 1.0.2 --min-app-version 1.0.1 --tag v1.0.2 --output release --private-key .release-secrets/update-private-key.pem --native-path release/Wireframe-Studio-Setup-1.0.2-x64.exe --native-version 1.0.2
 ```
 
 每个 Release 上传安装器、`.blockmap`、`latest.yml`、`renderer-<version>.zip` 和 `renderer-update.json`。私钥须单独备份。轮换公钥需要新桌面运行时，不能静默替换已有安装的信任根。

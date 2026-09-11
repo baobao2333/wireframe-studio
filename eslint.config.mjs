@@ -21,6 +21,13 @@ const eslintConfig = defineConfig([
     ".wireframe-runtime/**",
   ]),
   {
+    files: ["components/grapes-studio.tsx", "components/import-dialog.tsx"],
+    rules: {
+      // The desktop renderer serves local image URLs without a Next.js image server.
+      "@next/next/no-img-element": "off",
+    },
+  },
+  {
     files: ["components/ui/**/*.{ts,tsx}", "hooks/use-mobile.ts"],
     rules: {
       // These files are vendored verbatim from shadcn@4.17.0. Keep the

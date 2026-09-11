@@ -47,6 +47,7 @@ const bundled = JSON.parse(
   extractFile(archive, "desktop/release.json").toString(),
 );
 assert.equal(bundled.appVersion, pkg.version);
+assert.equal(payload.minAppVersion,bundled.minAppVersion);
 assert.equal(
   extractFile(archive, "desktop/main.mjs").toString(),
   await readFile(join(root, "desktop/main.mjs"), "utf8"),
@@ -54,6 +55,8 @@ assert.equal(
 for (const resource of [
   "ocr/opencv.js",
   "ocr/worker.min.js",
+  "ocr/shape-worker.js",
+  "THIRD-PARTY-NOTICES.txt",
   "vision-instructions.txt",
   "app.ico",
 ])
