@@ -17,7 +17,8 @@ import {
 import { Progress } from "@/components/ui/progress";
 import { readImage, parseImage } from "@/lib/image-parser";
 import type { Project } from "@/lib/wireframe";
-import { modelImage } from "@/lib/model-client";
+import { modelImage, type ModelProgress } from "@/lib/model-client";
+import { RecognitionProgress } from "./recognition-progress";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { desktop } from "@/lib/desktop";
 
@@ -45,6 +46,7 @@ export function ImportDialog({
     [progress, setProgress] = useState(0),
     [status, setStatus] = useState(""),
     [error, setError] = useState(""),
+    [modelProgress, setModelProgress] = useState<ModelProgress | null>(null),
     [result, setResult] = useState<Project | null>(null);
   const fileRef = useRef<HTMLInputElement>(null),
     controller = useRef<AbortController | null>(null),
@@ -59,6 +61,7 @@ export function ImportDialog({
     const seq = ++fileSequence.current;
     setError("");
     setResult(null);
+    setModelProgress(null);
     try {
       const next = await readImage(file);
       if (seq !== fileSequence.current) return;
@@ -77,6 +80,7 @@ export function ImportDialog({
     setBusy(true);
     setError("");
     setResult(null);
+    setModelProgress(null);
     setProgress(0);
     controller.current = new AbortController();
     const c = controller.current;
@@ -84,7 +88,7 @@ export function ImportDialog({
     try {
       const project =
         mode === "model"
-          ? await modelImage(image, width, c.signal, setStatus)
+          ? await modelImage(image, width, c.signal, setModelProgress)
           : await parseImage(image, {
               width,
               language,
@@ -139,6 +143,7 @@ export function ImportDialog({
             if (!busy) {
               setMode(v);
               setResult(null);
+              setModelProgress(null);
             }
           }}
         >
@@ -177,8 +182,8 @@ export function ImportDialog({
             <>
               <img src={image.src} alt="待解析的界面图片" />
               <span className="image-file-label">
-                {image.name}{" "}
-                <span>
+                <span className="image-file-name" title={image.name}>{image.name}</span>
+                <span className="image-file-dimensions">
                   {image.width} × {image.height}
                 </span>
               </span>
@@ -226,11 +231,13 @@ export function ImportDialog({
               onChange={(e) => {
                 setWidth(Number(e.target.value));
                 setResult(null);
+                setModelProgress(null);
               }}
             />
           </label>
         </div>
-        {busy && (
+        {mode === "model" && modelProgress && <RecognitionProgress progress={modelProgress} onCancel={() => controller.current?.abort()} />}
+        {busy && mode === "ocr" && (
           <div className="parse-progress">
             <div>
               <Loader2 size={15} className="spin" />
@@ -279,6 +286,7 @@ export function ImportDialog({
               onClick={async () => {
                 if ((await onImport(result)) === false) return;
                 setResult(null);
+                setModelProgress(null);
                 setImage(null);
               }}
             >

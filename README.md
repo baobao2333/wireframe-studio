@@ -12,6 +12,8 @@ Windows 桌面线框编辑器。用户定义信息层级、字号、对齐和组
 
 - GrapesJS 编辑引擎，基础组件、组合组件与“我的组件”库；支持拖动、嵌套、撤销、重做和富文本。
 - 编辑信息层级、字号、间距、颜色、对齐和实现备注。
+- 图标支持 Lucide 图标库或 Unicode / emoji 符号占位，含常用符号组件与专属编辑。符号随工程、组件库和导出代码保留；彩色 emoji 的形状与配色由系统字体决定，单色符号可以改色。
+- 符号不自动折行。溢出时可主动使用“适配符号字号”，只缩小字号并支持撤销；不会自动改变用户定义的区域尺寸或字号。
 - 打开 `.wireframe` 和兼容 JSON；当前工程与组件库自动保存到当前 Windows 用户的应用数据目录。原浏览器版数据不会自动迁移，可先导出 `project.json` 再在桌面版打开。
 - 导出 ZIP 包含 PNG、SVG、HTML、React TSX、工程 JSON、设计规范和 Codex 交接文本。导出代码是静态界面，不是已完成的业务应用。
 
@@ -20,6 +22,8 @@ Windows 桌面线框编辑器。用户定义信息层级、字号、对齐和组
 默认调用当前用户已安装并登录的本机 Codex，不另保存 API Key。图片会通过 Codex 发送到用户已配置的模型服务，并非纯离线识别；不修改全局模型或 provider 配置。模型使用与额度遵循用户的 Codex 账号和设置。
 
 模型结果始终是待确认草稿，保留置信度与备注。复杂插画或棋盘可能只得到占位组件，须检查布局、文本与层级后再交给 Codex。
+
+识别面板显示准备、模型识别、组件校验和完成阶段，以及已用时、最近事件、本机服务响应和超时剩余时间。阶段来自实际任务与 Codex JSONL 事件，不估算模型完成百分比；长时间没有新事件不等于连接已断开。进度中不展示模型推理或原始消息内容。
 
 不使用模型时，可显式选择本机 OCR。识别引擎与中英文语言包随安装器提供，无需联网下载。临时模型输入输出在任务结束后清理；工程中的参考图片随用户主动保存或导出。
 
@@ -54,9 +58,9 @@ npm run package
 
 ```sh
 npm run package:signed
-node scripts/make-hot-update.mjs --version 1.0.6 --min-app-version 1.0.6 --tag v1.0.6 --output release --private-key .release-secrets/update-private-key.pem --native-path release/Wireframe-Studio-Setup-1.0.6-x64.exe --native-version 1.0.6
+node scripts/make-hot-update.mjs --version 1.0.7 --min-app-version 1.0.7 --tag v1.0.7 --output release --private-key .release-secrets/update-private-key.pem --native-path release/Wireframe-Studio-Setup-1.0.7-x64.exe --native-version 1.0.7
 node scripts/verify-release.mjs
-npm run test:signature -- --signed release/Wireframe-Studio-Setup-1.0.6-x64.exe
+npm run test:signature -- --signed release/Wireframe-Studio-Setup-1.0.7-x64.exe
 ```
 
 每个 Release 上传安装器、`.blockmap`、`latest.yml`、`renderer-<version>.zip`、`renderer-update.json` 和 `SHA256SUMS.txt`。私钥须单独备份。轮换公钥需要新桌面运行时，不能静默替换已有安装的信任根。

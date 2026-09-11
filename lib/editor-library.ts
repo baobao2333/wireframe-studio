@@ -1,4 +1,4 @@
-import type { ComponentDefinition, Editor } from "grapesjs";
+import type { Component, ComponentDefinition, Editor } from "grapesjs";
 import {
   makeNode,
   kindNames,
@@ -7,7 +7,7 @@ import {
   type WNode,
   type Kind,
 } from "./wireframe";
-import { iconAssets } from "./icon-assets";
+import { iconAssets, iconChoices, symbolFontFamily, symbolPresets, type IconName } from "./icon-assets";
 
 const txt = (text: string): ComponentDefinition => ({
   type: "textnode",
@@ -22,6 +22,108 @@ const label = (
   components: [txt(text)],
   style,
 });
+export function readIcon(component: Component): { text: string; icon: IconName } {
+  const textOf = (c: Component): string => c.is("textnode")
+    ? String(c.get("content") || "")
+    : c.components().map(textOf).join("");
+  const stored = component.getAttributes()["data-icon"];
+  const oldSvg = component.findType("svg")[0];
+  const classes = String(oldSvg?.getAttributes().class || "").split(/\s+/);
+  const icon = iconChoices.find((choice) => choice.id === stored)?.id
+    || iconChoices.find((choice) => classes.includes(`lucide-${choice.id === "home" ? "house" : choice.id === "close" ? "x" : choice.id}`))?.id
+    || "search";
+  return { text: textOf(component), icon };
+}
+const iconStyle = (text: string) => text
+  ? { display: "block", "align-content": "center", "font-family": symbolFontFamily, "white-space": "pre", "overflow-wrap": "normal" }
+  : { display: "flex", "align-content": "normal", "font-family": "Arial, Microsoft YaHei, sans-serif", "white-space": "pre-wrap", "overflow-wrap": "anywhere" };
+export function updateIcon(component: Component, text: string, icon: IconName) {
+  if (component.getAttributes()["data-kind"] !== "icon") return;
+  component.addAttributes({ "data-icon": icon });
+  component.components(text ? [txt(text)] : iconAssets[icon]);
+  component.addStyle({
+    ...iconStyle(text),
+    ...(component.getStyle().display === "none" ? { display: "none" } : {}),
+  });
+}
+type SymbolRect = { left: number; top: number; right: number; bottom: number; width: number; height: number };
+export type IconSymbolMeasurement = {
+  fontSize: number;
+  box: SymbolRect;
+  text: SymbolRect;
+  overflow: boolean;
+};
+export function measureIconSymbol(component: Component): IconSymbolMeasurement | null {
+  if (component.getAttributes()["data-kind"] !== "icon" || !readIcon(component).text) return null;
+  const element = component.getEl();
+  if (!element?.isConnected) return null;
+  const style = element.ownerDocument.defaultView!.getComputedStyle(element);
+  const outer = element.getBoundingClientRect();
+  const px = (value: string) => parseFloat(value) || 0;
+  const insetX = px(style.borderLeftWidth) + px(style.paddingLeft) + px(style.paddingRight) + px(style.borderRightWidth);
+  const insetY = px(style.borderTopWidth) + px(style.paddingTop) + px(style.paddingBottom) + px(style.borderBottomWidth);
+  const cssWidth = px(style.width) + (style.boxSizing === "border-box" ? 0 : insetX);
+  const cssHeight = px(style.height) + (style.boxSizing === "border-box" ? 0 : insetY);
+  if (!outer.width || !outer.height || !cssWidth || !cssHeight) return null;
+  const scaleX = outer.width / cssWidth, scaleY = outer.height / cssHeight;
+  const left = outer.left + (px(style.borderLeftWidth) + px(style.paddingLeft)) * scaleX;
+  const top = outer.top + (px(style.borderTopWidth) + px(style.paddingTop)) * scaleY;
+  const width = outer.width - insetX * scaleX, height = outer.height - insetY * scaleY;
+  const box = { left, top, width, height, right: left + width, bottom: top + height };
+  const range = element.ownerDocument.createRange();
+  range.selectNodeContents(element);
+  if (!range.getClientRects().length) return null;
+  const bounds = range.getBoundingClientRect();
+  const text = { left: bounds.left, top: bounds.top, right: bounds.right, bottom: bounds.bottom, width: bounds.width, height: bounds.height };
+  return {
+    fontSize: px(style.fontSize), box, text,
+    overflow: text.left < box.left || text.top < box.top || text.right > box.right || text.bottom > box.bottom,
+  };
+}
+export function fitIconSymbol(component: Component):
+  | { status: "fitted"; fontSize: number }
+  | { status: "unchanged" | "too-small" | "unavailable" } {
+  const before = measureIconSymbol(component);
+  if (!before || !before.fontSize) return { status: "unavailable" };
+  if (!before.overflow) return { status: "unchanged" };
+  if (before.fontSize <= 8) return { status: "too-small" };
+  const element = component.getEl()!;
+  const original = element.style.getPropertyValue("font-size");
+  const priority = element.style.getPropertyPriority("font-size");
+  let fontSize = 8;
+  try {
+    // Probe the rendered font without writing a component or an undo entry.
+    const probe = (size: number) => {
+      element.style.setProperty("font-size", `${size}px`, "important");
+      return measureIconSymbol(component);
+    };
+    const minimum = probe(8);
+    if (!minimum) return { status: "unavailable" };
+    if (minimum.overflow) return { status: "too-small" };
+    const ratio = Math.min(before.box.width / before.text.width, before.box.height / before.text.height, 1);
+    const candidate = Math.max(8, Math.floor(before.fontSize * ratio * 100) / 100);
+    const measured = probe(candidate);
+    if (!measured) return { status: "unavailable" };
+    if (!measured.overflow) fontSize = candidate;
+    else {
+      let lower = 8, upper = candidate;
+      for (let i = 0; i < 14 && upper - lower > 0.01; i++) {
+        const middle = Math.floor((lower + upper) * 50) / 100;
+        if (middle <= lower) break;
+        const next = probe(middle);
+        if (!next) return { status: "unavailable" };
+        if (next.overflow) upper = middle;
+        else lower = middle;
+      }
+      fontSize = lower;
+    }
+  } finally {
+    if (original) element.style.setProperty("font-size", original, priority);
+    else element.style.removeProperty("font-size");
+  }
+  component.addStyle({ "font-size": `${fontSize}px` });
+  return { status: "fitted", fontSize };
+}
 export function componentDefinition(
   n: WNode,
   parent?: WNode,
@@ -152,8 +254,10 @@ export function componentDefinition(
     ];
   }
   if (n.type === "icon") {
-    def.components = iconAssets[n.icon || "search"];
-    css.display = "flex";
+    def.attributes = { ...def.attributes, "data-icon": n.icon || "search" };
+    def.components = n.text ? [txt(n.text)] : iconAssets[n.icon || "search"];
+    Object.assign(css, iconStyle(n.text));
+    if (n.hidden) css.display = "none";
   }
   if (n.type === "line") {
     def.components = [];
@@ -314,6 +418,17 @@ export function registerLibrary(editor: Editor) {
                 ? "user"
                 : "plus"
         ],
+    }),
+  );
+  symbolPresets.slice(0, 3).forEach((symbol) =>
+    editor.BlockManager.add(`symbol-${symbol.id}`, {
+      label: `${symbol.label}符号`,
+      category: "基础组件",
+      content: content("icon", {
+        name: `${symbol.label}符号`, text: symbol.text,
+        w: 40, h: 40, fontSize: 28, lineHeight: 1, align: "center",
+      }),
+      attributes: { title: `${symbol.label}符号` },
     }),
   );
   const group = (

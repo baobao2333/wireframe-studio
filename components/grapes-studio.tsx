@@ -40,6 +40,16 @@ import {
   ChevronDown,
   Save,
   Settings,
+  Home,
+  Bell,
+  Menu,
+  ChevronRight,
+  Plus,
+  Heart,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  Shrink,
 } from "lucide-react";
 import {
   Type,
@@ -93,7 +103,12 @@ import {
   componentDefinition,
   baseCanvasCss,
   registerLibrary,
+  readIcon,
+  updateIcon,
+  measureIconSymbol,
+  fitIconSymbol,
 } from "@/lib/editor-library";
+import { iconChoices, symbolPresets, type IconName } from "@/lib/icon-assets";
 import {
   freshDefinition,
   captureLibraryComponent,
@@ -213,8 +228,93 @@ const blockIcons: Record<string, LucideIcon> = {
   row: List,
 };
 function BlockIcon({ id }: { id: string }) {
+  const symbol = symbolPresets.find((item) => id === `symbol-${item.id}`);
+  if (symbol) return <span className="symbol-block-glyph" aria-hidden="true">{symbol.text}</span>;
   const Icon = blockIcons[id.replace(/^(base|combo)-/, "")] || Library;
   return <Icon size={26} />;
+}
+const libraryIcons: Record<IconName, LucideIcon> = {
+  search: Search, home: Home, user: UserRound, bell: Bell, settings: Settings,
+  menu: Menu, "chevron-right": ChevronRight, plus: Plus, star: Star,
+  heart: Heart, check: Check, close: X,
+};
+function IconInspector({ component }: { component: Component }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const value = readIcon(component);
+  const symbolMode = draft !== null || value.text !== "";
+  const symbolOverflow = symbolMode && measureIconSymbol(component)?.overflow;
+  const element = component.getEl();
+  const style = element?.ownerDocument.defaultView!.getComputedStyle(element);
+  const color = style?.color || String(component.getStyle().color || "#34363c");
+  const rgb = color.match(/^rgba?\((\d+)[, ]+(\d+)[, ]+(\d+)/);
+  const hexColor = rgb
+    ? "#" + rgb.slice(1, 4).map((channel) => Number(channel).toString(16).padStart(2, "0")).join("")
+    : /^#[\da-f]{6}$/i.test(color) ? color : "#34363c";
+  const chooseSymbol = (text: string) => {
+    setDraft(null);
+    updateIcon(component, text, value.icon);
+  };
+  return <section className="inspector-section">
+    <h3>图标内容</h3>
+    <Tabs value={symbolMode ? "symbol" : "library"} onValueChange={(mode) => {
+      setDraft(null);
+      updateIcon(component, mode === "symbol" ? value.text || symbolPresets[0].text : "", value.icon);
+    }}>
+      <TabsList className="icon-mode-tabs">
+        <TabsTrigger value="symbol">符号</TabsTrigger>
+        <TabsTrigger value="library">图标库</TabsTrigger>
+      </TabsList>
+    </Tabs>
+    {symbolMode ? <>
+      <label htmlFor="icon-symbol" className="spaced">Unicode 符号</label>
+      <input id="icon-symbol" aria-label="图标符号" className="symbol-input"
+        maxLength={10000} value={draft ?? value.text}
+        onChange={(event) => {
+          setDraft(event.target.value);
+          updateIcon(component, event.target.value, value.icon);
+        }}
+        onBlur={() => setDraft(null)} />
+      <div className="icon-picker-grid spaced" aria-label="常用符号">
+        {symbolPresets.map((symbol) => <Tool key={symbol.id} label={`${symbol.label}符号`}
+          active={value.text === symbol.text} aria-pressed={value.text === symbol.text}
+          onClick={() => chooseSymbol(symbol.text)}>
+          <span className="symbol-picker-glyph" aria-hidden="true">{symbol.text}</span>
+        </Tool>)}
+      </div>
+    </> : <div className="icon-picker-grid spaced" aria-label="图标库">
+      {iconChoices.map((choice) => {
+        const Icon = libraryIcons[choice.id];
+        return <Tool key={choice.id} label={`${choice.label}图标`}
+          active={value.icon === choice.id} aria-pressed={value.icon === choice.id}
+          onClick={() => updateIcon(component, "", choice.id)}><Icon size={18} /></Tool>;
+      })}
+    </div>}
+    {symbolMode && <div className="field-pair spaced">
+      <Numeric label="符号字号" value={parseFloat(style?.fontSize || String(component.getStyle()["font-size"] || 16))}
+        min={8} max={160} onCommit={(size) => component.addStyle({ "font-size": `${size}px` })} />
+    </div>}
+    {symbolOverflow && <div className="icon-overflow-warning spaced" role="status">
+      <span>符号超出区域</span>
+      <Tool label="适配符号字号" onClick={() => {
+        const result = fitIconSymbol(component);
+        if (result.status === "too-small") toast.error("符号在 8px 下仍超出区域", { description: "原字号与区域尺寸未修改。" });
+        else if (result.status === "unavailable") toast.error("暂时无法测量符号", { description: "原字号未修改。" });
+      }}><Shrink size={16} /></Tool>
+    </div>}
+    <div className="icon-color-row spaced">
+      <label htmlFor="icon-color">单色颜色</label>
+      <input id="icon-color" type="color" aria-label="图标单色颜色" title="彩色 emoji 保留系统配色" value={hexColor}
+        onChange={(event) => component.addStyle({ color: event.target.value })} />
+    </div>
+    {symbolMode && <div className="align-tools" aria-label="符号内容对齐">
+      {(["left", "center", "right"] as const).map((alignment, index) => {
+        const Icon = [AlignLeft, AlignCenter, AlignRight][index];
+        return <Tool key={alignment} label={["符号左对齐", "符号居中", "符号右对齐"][index]}
+          active={(style?.textAlign || component.getStyle()["text-align"]) === alignment}
+          onClick={() => component.addStyle({ "text-align": alignment })}><Icon size={16} /></Tool>;
+      })}
+    </div>}
+  </section>;
 }
 
 export default function GrapesStudio() {
@@ -1420,6 +1520,7 @@ export default function GrapesStudio() {
                       </Tool>
                     </div>
                   </section>
+                  {attrs["data-kind"] === "icon" && <IconInspector key={selection.getId()} component={selection} />}
                   <section className="inspector-section">
                     <h3>信息层级</h3>
                     <select

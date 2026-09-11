@@ -37,10 +37,20 @@ export type DesktopInfo = {
     error?: string;
   };
 };
+export type VisionProgress = {
+  stage: "starting" | "recognizing" | "receiving" | "validating" | "complete";
+  activityAgeMs: number | null;
+  eventCount: number;
+  outputChars: number;
+  nodeCount: number | null;
+  timeoutMs: number;
+  warning: string | null;
+};
 export type VisionJob = {
   status: string;
   message: string;
   elapsed: number;
+  progress?: VisionProgress;
   error: string;
   result: {
     title: string;
