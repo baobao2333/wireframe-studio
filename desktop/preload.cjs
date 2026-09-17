@@ -11,6 +11,11 @@ contextBridge.exposeInMainWorld(
   "wireframeDesktop",
   Object.freeze({
     info: () => call("app:info"),
+    logAppend: (event) => call("logs:append", event),
+    logStatus: () => call("logs:status"),
+    logRecent: (limit) => call("logs:recent", limit),
+    logFlush: () => call("logs:flush"),
+    logReveal: () => call("logs:reveal"),
     storageGet: (key) => call("storage:get", key),
     storageSet: (key, value) => call("storage:set", key, value),
     openProject: () => call("project:open"),

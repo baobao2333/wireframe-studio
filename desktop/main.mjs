@@ -23,6 +23,7 @@ import { createControlService } from "./control-service.mjs";
 import { createControlRpc } from "./control-rpc.mjs";
 import { registerCodexControl } from "./control-registration.mjs";
 import { controlTools } from "../control/schema.mjs";
+import { createOperationLog } from "./operation-log.mjs";
 
 const directory = fileURLToPath(new URL(".", import.meta.url));
 const publisher = JSON.parse(await readFile(join(directory, "publisher.json"), "utf8"));
@@ -78,6 +79,7 @@ async function start() {
   let rendererIsReady = false;
   const userData = app.getPath("userData");
   await mkdir(userData, { recursive: true });
+  const operationLogDirectory = join(userData, "logs", "operations");
   const storage = createStorage(join(userData, "documents"));
   const vision = createVisionService({
     runtimeDir: join(userData, "vision", "jobs"),
@@ -115,6 +117,8 @@ async function start() {
     fetchImpl: electronFetch,
     onState: (state) => send("update:state", state),
   });
+  const operationLog = createOperationLog({ directory: operationLogDirectory,
+    runtime: { appVersion: release.appVersion, rendererVersion: hot.getState().currentVersion } });
   const autoUpdater = updaterPackage.autoUpdater;
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
@@ -224,6 +228,20 @@ async function start() {
       trusted(event);
       return fn(...args);
     });
+  handle("logs:append", async event => {
+    if (!event || !["editor", "control"].includes(event.source) || event.event?.startsWith("session.")) throw Error("日志来源无效");
+    await operationLog.append(event);
+    return operationLog.status();
+  });
+  handle("logs:status", () => operationLog.status());
+  handle("logs:recent", limit => operationLog.readRecent(limit));
+  handle("logs:flush", () => operationLog.flush());
+  handle("logs:reveal", async () => {
+    try { await operationLog.flush(); }
+    catch { if (operationLog.status().error === "PATH_UNSAFE") throw Error("日志路径不安全，拒绝打开"); }
+    const error = await shell.openPath(operationLogDirectory);
+    if (error) throw Error("无法打开操作日志目录");
+  });
   handle("control:status", () => control?.status() || { enabled: false, ready: false, connected: false, busy: false, error: controlStartupError });
   handle("control:configure", enabled => {
     if (!control) throw Error(controlStartupError);
@@ -456,6 +474,7 @@ async function start() {
     await vision.dispose();
     controlRpc.reset();
     await control?.dispose();
+    await closeOperationLog();
     allowClose = true;
     autoUpdater.quitAndInstall(false, true);
   });
@@ -476,6 +495,8 @@ async function start() {
       clearTimeout(bootTimer);
       rendererCrashed = false;
       rendererIsReady = true;
+      void operationLog.append({ event: "renderer.ready", source: "desktop",
+        runtime: { appVersion: release.appVersion, rendererVersion: version } }).catch(() => console.error("Operation log renderer event failed"));
       control?.setReady(true);
       await deliverOpen();
     } catch (e) {
@@ -488,11 +509,16 @@ async function start() {
       await vision.dispose();
       controlRpc.reset();
       await control?.dispose();
+      await closeOperationLog();
       allowClose = true;
       app.quit();
     } catch (e) {
       dialog.showErrorBox("未能保存工程", e.message);
     }
+  }
+  async function closeOperationLog() {
+    try { await operationLog.close(); }
+    catch { console.error("Operation log close failed; project storage is independent"); }
   }
   ipcMain.on("renderer:close-ready", async (event) => {
     try {

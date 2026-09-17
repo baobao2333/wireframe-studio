@@ -113,7 +113,7 @@ export async function stageDesktop({ root = projectRoot, install = true, npmCli 
       if (/\.(mjs|cjs|json|pem)$/i.test(name) || name === "verify-signature.ps1") await copyRuntime(path.join(desktop, name), path.join(temporary, "desktop", name), `desktop/${name}`);
     }
     await copyRuntime(path.join(root, "server/vision-schema.mjs"), path.join(temporary, "server/vision-schema.mjs"), "server/vision-schema.mjs");
-    for (const name of ["schema.mjs", "client.mjs", "mcp-server.mjs", "entry.mjs"])
+    for (const name of ["schema.mjs", "operation-log-schema.mjs", "client.mjs", "mcp-server.mjs", "entry.mjs"])
       await copyRuntime(path.join(root, "control", name), path.join(temporary, "control", name), `control/${name}`);
     await copyRuntime(renderer, path.join(temporary, "renderer"), "renderer");
     const release = JSON.parse(await readFile(path.join(temporary, "desktop/release.json"), "utf8"));

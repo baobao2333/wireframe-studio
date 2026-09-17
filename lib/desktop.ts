@@ -1,3 +1,5 @@
+import type { OperationEvent, OperationRecord, OperationLogStatus } from "./operation-log";
+
 export type UpdateState = {
   status: string;
   appVersion: string;
@@ -70,6 +72,11 @@ export type CodexControlState = {
 export type CodexControlRequest = { id: string; deadline: number; tool: string; args: Record<string, unknown> };
 export interface DesktopApi {
   info(): Promise<DesktopInfo>;
+  logAppend(event: OperationEvent): Promise<OperationLogStatus>;
+  logStatus(): Promise<OperationLogStatus>;
+  logRecent(limit?: number): Promise<OperationRecord[]>;
+  logFlush(): Promise<void>;
+  logReveal(): Promise<void>;
   openImage(): Promise<{
     name: string;
     type: string;

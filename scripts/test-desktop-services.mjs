@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { link, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
@@ -8,9 +8,13 @@ import { atomicJson, createStorage } from "../desktop/storage.mjs";
 import { createVisionService } from "../desktop/vision-service.mjs";
 import { createVisionProgress, VISION_TIMEOUT_MS } from "../desktop/vision-progress.mjs";
 import { isolatedVisionMcpOptions, visionFeatureOptions } from "../desktop/vision-config.mjs";
+import { createOperationLog } from "../desktop/operation-log.mjs";
+import { operationLogRecordSchema } from "../control/operation-log-schema.mjs";
+import { createOperationRecorder } from "../lib/operation-log.ts";
 
 const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "wireframe-services-test-"));
 const services = [];
+const operationLogs = [];
 const input = { image: `data:image/png;base64,${Buffer.from("image fixture").toString("base64")}`, width: 390, name: "fixture.png" };
 const eventLine = event => Buffer.from(JSON.stringify(event) + "\n");
 const resultFixture = () => {
@@ -53,6 +57,157 @@ async function visionFixture(options = {}) {
 }
 
 try {
+  await test("renderer log queues are bounded and failures stay visible without blocking project close", async () => {
+    let release, writes = 0, warnings = 0;
+    const wait = new Promise(resolve => { release = resolve; });
+    const recorder = createOperationRecorder(async () => { writes++; await wait; throw Error("fixture failure"); }, () => { warnings++; });
+    for (let index = 0; index < 300; index++) recorder.record({ event: "selection", source: "editor" });
+    await Promise.resolve();
+    assert.equal(writes, 256);
+    assert.equal(warnings, 1, "A bounded queue overflow must be visible");
+    release();
+    await recorder.flush();
+    assert.equal(warnings, 1, "Repeated failures must not flood notifications");
+    let failedWarning = false;
+    const failed = createOperationRecorder(async () => { throw Error("fixture write failed"); }, () => { failedWarning = true; });
+    failed.record({ event: "project.save", source: "editor", code: "OK" });
+    await failed.flush();
+    assert.equal(failedWarning, true);
+  });
+  await test("operation logs serialize geometry events and close with a durable ordered session", async () => {
+    const directory = await fixtureDirectory();
+    const runtime = { appVersion: "1.1.2", rendererVersion: "1.1.2-test.1+fixture" };
+    const log = createOperationLog({ directory, runtime });
+    runtime.appVersion = "9.9.9";
+    operationLogs.push(log);
+    const event = {
+      event: "component.resize.end", source: "editor", operationId: "resize-1", componentId: "i123",
+      parentId: "frame-1", kind: "image", before: { x: 20, y: 30, width: 90, height: 100 },
+      after: { x: null, y: null, width: 120, height: 130 },
+      viewport: { zoom: 43, scrollX: 0, scrollY: 50, pointerX: 140, pointerY: 180, devicePixelRatio: 1.5 },
+      changedProperties: ["width", "height"], code: "MOVED", durationMs: 1200,
+    };
+    const first = log.append(event);
+    event.after.width = 900;
+    const remaining = Array.from({ length: 40 }, (_, count) => log.append({ event: "component.update", source: "editor", count }));
+    await Promise.all([first, ...remaining]);
+    await log.flush();
+    const beforeClose = await log.readRecent(200);
+    assert.equal(beforeClose.length, 42);
+    assert.equal(beforeClose[1].after.width, 120, "Validation must detach caller-owned event objects");
+    assert.equal(beforeClose[1].after.x, null, "Unknown geometry must not silently become zero");
+    assert.deepEqual(beforeClose.slice(2).map(record => record.count), Array.from({ length: 40 }, (_, count) => count));
+    const closing = log.close();
+    assert.equal(log.close(), closing);
+    await closing;
+    await log.flush();
+    await assert.rejects(log.append({ event: "selection", source: "editor" }), { code: "CLOSED" });
+    const records = (await readFile(path.join(directory, "operations.jsonl"), "utf8")).trim().split("\n").map(line => operationLogRecordSchema.parse(JSON.parse(line)));
+    assert.deepEqual(records.map(record => record.sequence), Array.from({ length: 43 }, (_, index) => index + 1));
+    assert.equal(records[0].event, "session.start");
+    assert.deepEqual(records[0].runtime, { appVersion: "1.1.2", rendererVersion: "1.1.2-test.1+fixture" });
+    assert.equal(records.at(-1).event, "session.end");
+    assert.ok(records.every(record => record.sessionId === log.status().sessionId));
+    assert.deepEqual(log.status(), { sessionId: records[0].sessionId, sequence: 43, closed: true, error: null });
+  });
+
+  await test("operation logs reject sensitive fields and unknown values without poisoning valid writes", async () => {
+    const directory = await fixtureDirectory();
+    assert.throws(() => createOperationLog({ directory, runtime: { appVersion: "PRIVATE_VERSION", rendererVersion: "1.1.2" } }), { code: "INVALID_RUNTIME" });
+    const log = createOperationLog({ directory });
+    operationLogs.push(log);
+    for (const extra of [
+      { text: "PRIVATE_TEXT" }, { html: "<p>PRIVATE_HTML</p>" }, { image: "PRIVATE_IMAGE" },
+      { filename: "PRIVATE_FILE.png" }, { token: "PRIVATE_TOKEN" }, { code: "PRIVATE_ERROR" },
+      { componentId: "PRIVATE_FILE.png" }, { sessionId: "forged" }, { sequence: 1 },
+      { before: { x: 1, y: 1, width: 1, height: 1, text: "PRIVATE" } },
+      { changedProperties: ["PRIVATE_PROPERTY"] },
+    ]) await assert.rejects(log.append({ event: "selection", source: "editor", ...extra }), { code: "INVALID_EVENT" });
+    await assert.rejects(log.readRecent(201), RangeError);
+    await log.append({ event: "selection", source: "editor", count: 1 });
+    await log.close();
+    assert.equal(log.status().error, null);
+    assert.doesNotMatch(await readFile(path.join(directory, "operations.jsonl"), "utf8"), /PRIVATE|forged|filename|html|token/);
+  });
+
+  await test("operation log rotation is bounded and recent records cross rotated files and sessions", async () => {
+    const directory = await fixtureDirectory();
+    const log = createOperationLog({ directory, maxFileBytes: 1024, maxFiles: 3 });
+    operationLogs.push(log);
+    await Promise.all(Array.from({ length: 40 }, (_, count) => log.append({ event: "viewport", source: "editor", count, viewport: { zoom: 100, scrollX: count, scrollY: 0 } })));
+    await log.close();
+    const names = await readdir(directory);
+    assert.deepEqual(names.sort(), ["operations.1.jsonl", "operations.2.jsonl", "operations.jsonl"]);
+    for (const name of names) assert.ok((await stat(path.join(directory, name))).size <= 1024);
+    const retained = await log.readRecent(200);
+    assert.ok(retained.length < 42 && retained.length > 3);
+    assert.equal(retained.at(-1).event, "session.end");
+    assert.deepEqual(retained.map(record => record.sequence), Array.from({ length: retained.length }, (_, index) => retained[0].sequence + index));
+    const nextSession = createOperationLog({ directory, maxFileBytes: 1024, maxFiles: 3 });
+    operationLogs.push(nextSession);
+    await nextSession.flush();
+    const latest = await nextSession.readRecent(2);
+    assert.equal(latest[0].sessionId, log.status().sessionId);
+    assert.equal(latest[1].sessionId, nextSession.status().sessionId);
+    assert.equal(latest[1].sequence, 1);
+    await nextSession.close();
+  });
+
+  await test("operation log file failures remain explicit and never expose native paths", async () => {
+    const directory = await fixtureDirectory();
+    await mkdir(path.join(directory, "operations.jsonl"));
+    const log = createOperationLog({ directory });
+    operationLogs.push(log);
+    const first = log.append({ event: "project.save", source: "desktop" });
+    const second = log.append({ event: "project.failed", source: "desktop", code: "SAVE_FAILED" });
+    assert.deepEqual((await Promise.allSettled([first, second])).map(result => result.status), ["rejected", "rejected"]);
+    await assert.rejects(log.flush(), { code: "PATH_UNSAFE" });
+    await assert.rejects(log.close(), cause => cause.code === "PATH_UNSAFE" && !cause.message.includes(directory));
+    assert.equal(log.status().error, "PATH_UNSAFE");
+  });
+
+  await test("an interrupted JSONL tail is preserved and cannot silently absorb a new session", async () => {
+    const directory = await fixtureDirectory();
+    const target = path.join(directory, "operations.jsonl");
+    await writeFile(target, '{"event":"component.resize.end"');
+    const log = createOperationLog({ directory });
+    operationLogs.push(log);
+    await assert.rejects(log.flush(), { code: "READ_FAILED" });
+    await assert.rejects(log.close(), { code: "READ_FAILED" });
+    assert.equal(await readFile(target, "utf8"), '{"event":"component.resize.end"');
+    assert.equal(log.status().sequence, 0);
+  });
+
+  await test("operation logs reject linked ancestors, hard-linked files and replaced active files", async () => {
+    const directory = await fixtureDirectory();
+    const target = path.join(directory, "target");
+    const linked = path.join(directory, "linked");
+    await mkdir(target);
+    await symlink(target, linked, process.platform === "win32" ? "junction" : "dir");
+    const linkedLog = createOperationLog({ directory: path.join(linked, "nested") });
+    operationLogs.push(linkedLog);
+    await assert.rejects(linkedLog.flush(), { code: "PATH_UNSAFE" });
+    await assert.rejects(linkedLog.close(), { code: "PATH_UNSAFE" });
+    assert.deepEqual(await readdir(target), [], "A linked ancestor must not be followed even when creating the log directory");
+    const privateFile = path.join(directory, "private.txt");
+    await writeFile(privateFile, "PRIVATE_SENTINEL");
+    await link(privateFile, path.join(target, "operations.jsonl"));
+    const hardLinkedLog = createOperationLog({ directory: target });
+    operationLogs.push(hardLinkedLog);
+    await assert.rejects(hardLinkedLog.flush(), { code: "PATH_UNSAFE" });
+    await assert.rejects(hardLinkedLog.close(), { code: "PATH_UNSAFE" });
+    assert.equal(await readFile(privateFile, "utf8"), "PRIVATE_SENTINEL");
+    const ordinaryDirectory = await fixtureDirectory();
+    const ordinaryLog = createOperationLog({ directory: ordinaryDirectory });
+    operationLogs.push(ordinaryLog);
+    await ordinaryLog.flush();
+    await rename(path.join(ordinaryDirectory, "operations.jsonl"), path.join(ordinaryDirectory, "replaced.jsonl"));
+    await writeFile(path.join(ordinaryDirectory, "operations.jsonl"), "PRIVATE_REPLACEMENT");
+    await assert.rejects(ordinaryLog.append({ event: "selection", source: "editor" }), { code: "PATH_UNSAFE" });
+    await assert.rejects(ordinaryLog.close(), { code: "PATH_UNSAFE" });
+    assert.equal(await readFile(path.join(ordinaryDirectory, "operations.jsonl"), "utf8"), "PRIVATE_REPLACEMENT");
+  });
+
   await test("failed storage batches settle every waiter and retain unsaved values for retry", async () => {
     const directory = await fixtureDirectory();
     const blocked = path.join(directory, "autosave.json");
@@ -423,6 +578,7 @@ try {
 
   console.log(`Desktop service checks passed: ${passed}; platform=${process.platform}; node=${process.version}`);
 } finally {
+  await Promise.allSettled(operationLogs.map(log => log.close()));
   await Promise.all(services.map((service) => service.dispose()));
   assert.equal(path.dirname(temporaryRoot), path.resolve(os.tmpdir()));
   assert.ok(path.basename(temporaryRoot).startsWith("wireframe-services-test-"));

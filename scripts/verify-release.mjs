@@ -65,10 +65,10 @@ assert.equal(payload.minAppVersion, bundled.minAppVersion);
 for (const name of ["main.mjs", "preload.cjs", "electron-fetch.mjs", "hot-update.mjs",
   "storage.mjs", "vision-service.mjs", "vision-progress.mjs", "vision-config.mjs", "vision-diagnostics.mjs", "release.json", "update-public-key.pem",
   "publisher.json", "windows-signature.mjs", "verify-signature.ps1",
-  "control-service.mjs", "control-rpc.mjs", "control-registration.mjs"]) {
+  "control-service.mjs", "control-rpc.mjs", "control-registration.mjs", "operation-log.mjs"]) {
   assert.deepEqual(extractFile(archive, join("desktop", name)), await readFile(join(root, "desktop", name)), name);
 }
-for (const name of ["schema.mjs", "client.mjs", "mcp-server.mjs", "entry.mjs"])
+for (const name of ["schema.mjs", "operation-log-schema.mjs", "client.mjs", "mcp-server.mjs", "entry.mjs"])
   assert.deepEqual(extractFile(archive, join("control", name)), await readFile(join(root, "control", name)), name);
 for (const [name, version] of Object.entries({ "@modelcontextprotocol/sdk": "1.30.0", zod: "3.25.76" }))
   assert.equal(JSON.parse(extractFile(archive, join("node_modules", name, "package.json")).toString()).version, version);

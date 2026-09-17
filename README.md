@@ -54,6 +54,37 @@ Windows 桌面线框编辑器。用户定义信息层级、字号、对齐和组
 
 Ed25519 更新签名不等同于 Windows Authenticode 的公共 CA 身份认证。自签名更新只接受固定证书，不能仅靠相同用户名通过；只有 Windows 验证成功或精确的自签名根不受信任结果可接受，文件篡改等其他错误仍会拒绝。发布私钥不在仓库、安装器或 CI 中。GitHub 不可用时仍可编辑本地工程。
 
+## 本地操作日志
+
+“应用与更新 > 本地操作日志”可刷新最近 100 条记录、打开目录或导出最近 200 条 JSON。原始 JSONL 位于应用数据目录的 `logs/operations/`，单文件最多 2 MiB，最多保留 5 个文件。日志只保存在本机，不自动上传。升级之前的操作不能补录。
+
+记录拖动/拉手缩放的开始、结束或取消，组件 ID、父 ID、拉手方向、前后几何、画布缩放/平移、DPR，以及选中、增删、撤销/重做、保存和 Codex 操作结果。移动中至多每 250 ms 采样一次组件变化；不保存文字正文、HTML、原图、原始文件名、备注或凭据。保存记录中的成功表示存储 Promise 已完成；与日志自身写入成功是两件事。
+
+日志写入失败会提示，不能当作“没有发生操作”。工程保存不依赖日志成功。损坏的 JSONL 尾行会保留并报 `READ_FAILED`，不会静默删掉现场；备份损坏文件后移出该日志目录并重启，才开始新的记录。
+
+## 架构与状态
+
+本节是架构入口，变更后仍须核对当前代码与运行版本。
+
+```text
+GrapesStudio (UI / Meta / project lifecycle)
+  -> GrapesJS (components, CSS, selection, native undo)
+     <- editor-geometry (drag / resize coordinate adapter)
+     -> editor-operation-log (passive event observer)
+  -> operation-log recorder -> preload IPC -> desktop/operation-log -> local JSONL
+  -> lib/storage -> preload IPC -> desktop/storage -> autosave.json
+Codex MCP -> control-service -> control-rpc -> lib/codex-control -> same GrapesJS
+```
+
+- `components/grapes-studio.tsx` 是桌面和开发界面的编辑入口。组件与 CSS 的唯一运行时权威是 GrapesJS；工程级名称、尺寸、参考图等由 `metaRef` 持有。识别领域模型只用于初稿导入，不并行维护另一份可编辑组件树。`studioFile` 将二者序列化；用户另存的文件与自动保存副本不是同一写入目标。
+- `lib/editor-geometry.ts` 收口拖动和拉手缩放的坐标适配。GrapesJS 0.23.6 的原始缩放位置混合了未缩放子矩形与已缩放/平移父矩形；适配器在每次开始时捕获父容器内 CSS px 坐标，用尺寸差保留对边，通过官方 `resize:update.updateStyle` 一次写回。拖动通过官方 `getPointerPosition` 区分 iframe 原生/透传事件与外层工具栏事件，统一到 iframe 逻辑 CSS px；只有外层坐标扣除 frame 屏幕原点并除以画布 zoom，不使用 DPR 再除一次。工具栏开始事件也由本模块归一化，不在 UI 重复处理。它不改画布 zoom、不另建历史栈，结束或销毁清理临时状态。已覆盖应用生成的 absolute、border-box 组件及嵌套边框；组件自身 rotate/scale 和导入的复杂相对单位布局不属于已验证范围。
+- `lib/editor-operation-log.ts` 被动读取实际样式，不修改组件或撤销历史。组件几何单位为父容器内 CSS px；不可计算用 null，不猜为 0。画布 `zoom` 是百分比，`canvasX/Y` 来自 GrapesJS pan model，DPR 是窗口的像素比。通用 `component:resize` 的 type 区分阶段，避免该版本重复触发 `resize:start` 导致重复快照。非几何编辑只记字段名，不记内容。
+- `control/operation-log-schema.mjs` 是 renderer 和 main 共用的严格日志契约。renderer recorder 限制在途请求并提示失败；main 是唯一文件写入方，生成 session UUID、UTC 时间与递增 sequence。初始化/追加/读取/轮转共用串行队列；flush/close 执行 fsync，关闭先排空再写终态。每次 renderer ready 记录实际版本，覆盖热更新后的版本变化。
+- `desktop/storage.mjs` 是持久化权威。150 ms 合并同一 key 的待写数据，原子替换，所有等待者收到成功或失败。启动先读取和校验，成功后才启用自动保存；项目替换期间不保存中间组件树。正常关闭和更新先等待保存，导出使用当前编辑器快照。失败保留待写值；日志失败不阻止工程保存或关闭。
+- `lib/codex-control.ts` 对同一 GrapesJS 校验 revision、锁定与交互忙状态，并复用原生撤销。主进程 loopback 身份和幂等请求由 `desktop/control-service.mjs` 管理，`control-rpc.mjs` 负责 renderer 生命周期；重载断开旧 RPC，不把未知执行结果当作未执行。
+
+验证入口：`npm test` 检查模型/库/保存/日志协议和失败边界；`node scripts/test-editor.mjs --geometry` 在隔离 Electron 中以逐帧、按住鼠标的输入实测八个拉手、缩放倍率、嵌套边框、跨文档拖动、取消及撤销，同时核对尺寸变化等于指针移动量，避免合并鼠标事件漏掉坐标错误；`npm run test:control` 检查真实原生 IPC、Codex 控制和操作日志，`node scripts/test-control-app.mjs --log-failure` 验证日志失败仍能编辑和保存。均不改当前用户工程。测试产物在 `work/`，不进入安装包。
+
 ## 构建
 
 需要 Node.js >=24 和 Windows x64。
@@ -76,9 +107,9 @@ npm run package
 
 ```sh
 npm run package:signed
-node scripts/make-hot-update.mjs --version 1.1.1 --min-app-version 1.1.1 --tag v1.1.1 --output release --private-key .release-secrets/update-private-key.pem --native-path release/Wireframe-Studio-Setup-1.1.1-x64.exe --native-version 1.1.1
+node scripts/make-hot-update.mjs --version 1.1.2 --min-app-version 1.1.2 --tag v1.1.2 --output release --private-key .release-secrets/update-private-key.pem --native-path release/Wireframe-Studio-Setup-1.1.2-x64.exe --native-version 1.1.2
 node scripts/verify-release.mjs
-npm run test:signature -- --signed release/Wireframe-Studio-Setup-1.1.1-x64.exe
+npm run test:signature -- --signed release/Wireframe-Studio-Setup-1.1.2-x64.exe
 ```
 
 每个 Release 上传安装器、`.blockmap`、`latest.yml`、`renderer-<version>.zip`、`renderer-update.json` 和 `SHA256SUMS.txt`。私钥须单独备份。轮换公钥需要新桌面运行时，不能静默替换已有安装的信任根。

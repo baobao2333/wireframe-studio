@@ -8,13 +8,18 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { controlStatus } from "../control/client.mjs";
 import sharp from "sharp";
+import { operationLogRecordSchema } from "../control/operation-log-schema.mjs";
 
-const { values } = parseArgs({ options: { executable: { type: "string" }, project: { type: "string" } } });
+const { values } = parseArgs({ options: { executable: { type: "string" }, project: { type: "string" }, "log-failure": { type: "boolean", default: false } } });
 const root = resolve(import.meta.dirname, "..");
 await mkdir(join(root, "work"), { recursive: true });
 const data = await mkdtemp(join(root, "work/control-app-check-"));
 await mkdir(join(data, "control"));
 await mkdir(join(data, "documents"));
+if (values["log-failure"]) {
+  await mkdir(join(data, "logs"));
+  await writeFile(join(data, "logs/operations"), "preserved broken log path");
+}
 await writeFile(join(data, "control/settings.json"), JSON.stringify({ enabled: true }));
 const hash = bytes => createHash("sha256").update(bytes).digest("hex");
 const original = values.project ? hash(await readFile(values.project)) : null;
@@ -111,8 +116,32 @@ try {
     process.stdin.end(JSON.stringify({ tool: "wireframe_get_state", args: {} }));
   });
   assert.equal(cliResult.document.name, state.document.name);
+  const logPath = join(data, "logs/operations/operations.jsonl");
+  const logDeadline = Date.now() + 5000;
+  let operationRecords = [], operationText;
+  if (values["log-failure"]) {
+    assert.equal(await readFile(join(data, "logs/operations"), "utf8"), "preserved broken log path");
+    assert.match(logs, /Operation log: PATH_UNSAFE/, "Log failures must be reported through IPC");
+  } else {
+  for (;;) {
+    operationText = await readFile(logPath, "utf8");
+    if (operationText.endsWith("\n")) {
+      operationRecords = operationText.trim().split("\n").map(line => operationLogRecordSchema.parse(JSON.parse(line)));
+      if (operationRecords.some(record => record.event === "control.outcome" && record.code === "OK")) break;
+    }
+    assert.ok(Date.now() < logDeadline, "Installed renderer did not persist control operation logs");
+    await sleep(100);
+  }
+  for (const event of ["session.start", "project.load", "project.save.start", "project.save", "component.update", "component.style", "control.outcome"])
+    assert.ok(operationRecords.some(record => record.event === event), `Missing operation event: ${event}`);
+  assert.ok(operationRecords.some(record => record.componentId === target.id && record.event === "component.style"
+    && record.after?.x === 30 && record.after?.width === 320 && record.changedProperties?.includes("left")), "Geometry style changes were not recorded accurately");
+  assert.ok(operationRecords.every((record, index) => record.sequence === index + 1));
+  for (const privateValue of ["Codex control check", "data:image", "Isolated acceptance:", state.document.name])
+    assert.ok(!operationText.includes(privateValue), `Operation log leaked private content: ${privateValue}`);
+  }
   if (values.project) assert.equal(hash(await readFile(values.project)), original, "Original project changed");
-  console.log(JSON.stringify({ passed: true, packaged: !!values.executable, document: state.document.name, components: state.total, library: library.blocks.length, preview: join(data, "control-preview.png"), nativeUndoRedo: true, durableSave: true, idempotent: true, conflict: true, stdioAndCli: true, originalUnchanged: true }));
+  console.log(JSON.stringify({ passed: true, packaged: !!values.executable, document: state.document.name, components: state.total, library: library.blocks.length, preview: join(data, "control-preview.png"), nativeUndoRedo: true, durableSave: true, idempotent: true, conflict: true, stdioAndCli: true, originalUnchanged: true, localOperationRecords: operationRecords.length, injectedLogFailure: values["log-failure"], privateContentExcluded: !values["log-failure"] }));
 } finally {
   await client?.close();
   if (child.exitCode === null) { child.kill(); await new Promise(resolve => child.once("exit", resolve)); }

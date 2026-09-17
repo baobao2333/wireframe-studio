@@ -13,6 +13,7 @@ import {
   DialogDescription,
 } from "./ui/dialog";
 import { desktop, type DesktopInfo, type UpdateState } from "@/lib/desktop";
+import { OperationLogPanel } from "./operation-log-panel";
 
 const labels: Record<string, string> = {
   idle: "暂无可用界面更新",
@@ -76,7 +77,7 @@ export function DesktopSettings({
     }
   }
   const native = info?.nativeUpdate,
-    nativeAvailable = state?.native && state.native.version !== info?.version,
+    nativeAvailable = state?.native && state.status !== "error" && state.status !== "checking" && state.native.version !== info?.version,
     nativeReady = native?.status === "ready" && native.version === state?.native?.version;
   return (
     <Dialog
@@ -122,6 +123,7 @@ export function DesktopSettings({
       </dl>
       {info?.codex.error&&<p className="update-warning">{info.codex.error}</p>}
       {info?.publisher?.error&&<p className="update-warning">{info.publisher.error}</p>}
+        <OperationLogPanel />
         <section className="update-section">
           <h3>
             <ShieldCheck size={16} />
@@ -142,7 +144,7 @@ export function DesktopSettings({
             <p className="update-warning">{state.rollbackReason}</p>
           )}
           {state?.error && (
-            <p className="update-warning">{state.error.message}</p>
+            <p className="update-warning">{state.error.code === "ROLLBACK_VERSION" ? "发布源版本较旧或已被回退，已拒绝更新。" : state.error.message}</p>
           )}
           <div className="update-actions">
             <button

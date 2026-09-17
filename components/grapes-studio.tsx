@@ -78,6 +78,9 @@ import { DesktopSettings } from "./desktop-settings";
 import { CodexControlPanel } from "./codex-control-panel";
 import { createCodexController } from "@/lib/codex-control";
 import { createColorPickerPositioning } from "@/lib/color-picker-positioning";
+import { createOperationRecorder } from "@/lib/operation-log";
+import { observeEditorOperations } from "@/lib/editor-operation-log";
+import { registerEditorGeometry } from "@/lib/editor-geometry";
 import appIcon from "@/assets/app.png?url";
 import { toast, Toaster } from "sonner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -116,7 +119,6 @@ import {
   freshDefinition,
   captureLibraryComponent,
   normalizeComponentStyle,
-  normalizeToolbarPointer,
 } from "@/lib/component-snapshot";
 import {
   studioFile,
@@ -327,6 +329,7 @@ export default function GrapesStudio() {
     traitHost = useRef<HTMLDivElement>(null),
     editor = useRef<Editor | null>(null),
     codexController = useRef<ReturnType<typeof createCodexController> | null>(null),
+    operationRecorder = useRef<ReturnType<typeof createOperationRecorder> | null>(null),
     fileRef = useRef<HTMLInputElement>(null);
   const [ready, setReady] = useState(false),
     [initError, setInitError] = useState(""),
@@ -361,21 +364,36 @@ export default function GrapesStudio() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [controlState, setControlState] = useState<CodexControlState | null>(null);
   const canSave = useRef(false),
+    loadingProject = useRef(false),
+    saveOperation = useRef<{ id: string; started: number } | null>(null),
     sequence = useRef(0),
     panning = useRef<{ x: number; y: number; cx: number; cy: number } | null>(
       null,
     );
   const persist = () => {
     const ed = editor.current;
-    if (!ed || !canSave.current) return;
+    if (!ed || !canSave.current || loadingProject.current) return;
     const seq = ++sequence.current;
+    if (!saveOperation.current) {
+      saveOperation.current = { id: crypto.randomUUID(), started: Date.now() };
+      operationRecorder.current?.record({ event: "project.save.start", source: "editor", operationId: saveOperation.current.id });
+    }
+    const operation = saveOperation.current;
     setSaved("保存中");
     set("wireframe-studio-v2", studioFile(ed, metaRef.current))
       .then(() => {
-        if (seq === sequence.current) setSaved("已存到本机");
+        if (seq === sequence.current) {
+          setSaved("已存到本机");
+          operationRecorder.current?.record({ event: "project.save", source: "editor", operationId: operation.id, durationMs: Date.now() - operation.started, code: "OK" });
+          saveOperation.current = null;
+        }
       })
       .catch((e) => {
         setSaved("保存失败");
+        if (saveOperation.current === operation) {
+          operationRecorder.current?.record({ event: "project.failed", source: "editor", operationId: operation.id, code: "SAVE_FAILED" });
+          saveOperation.current = null;
+        }
         toast.error("保存失败，请立即导出项目", { description: String(e) });
       });
   };
@@ -421,31 +439,44 @@ export default function GrapesStudio() {
   function loadWireframe(p: Project) {
     const ed = editor.current;
     if (!ed) return;
-    ed.UndoManager.stop();
-    ed.setStyle(baseCanvasCss);
-    ed.setComponents(projectComponents(p));
-    ed.getWrapper()?.addStyle({
-      "background-color": p.background === "none" ? "transparent" : p.background,
-    });
-    metaRef.current = {
-      name: p.name,
-      notes: p.notes,
-      width: p.width,
-      height: p.height,
-      reference: p.reference,
-      engineRevision: 2,
-    };
-    setMeta(metaRef.current);
-    dimensions(p.width, p.height);
-    ed.UndoManager.start();
-    ed.UndoManager.clear();
-    ed.select();
-    setSelection(null);
+    const previousLoading = loadingProject.current;
+    loadingProject.current = true;
+    operationRecorder.current?.record({ event: "project.load.start", source: "editor" });
+    try {
+      ed.UndoManager.stop();
+      ed.setStyle(baseCanvasCss);
+      ed.setComponents(projectComponents(p));
+      ed.getWrapper()?.addStyle({
+        "background-color": p.background === "none" ? "transparent" : p.background,
+      });
+      metaRef.current = {
+        name: p.name,
+        notes: p.notes,
+        width: p.width,
+        height: p.height,
+        reference: p.reference,
+        engineRevision: 2,
+      };
+      setMeta(metaRef.current);
+      dimensions(p.width, p.height);
+      ed.UndoManager.clear();
+      ed.select();
+      setSelection(null);
+      operationRecorder.current?.record({ event: "project.load", source: "editor", code: "OK", count: p.nodes.length });
+    } catch (error) {
+      operationRecorder.current?.record({ event: "project.failed", source: "editor", code: "LOAD_FAILED" });
+      throw error;
+    } finally {
+      ed.UndoManager.start();
+      loadingProject.current = previousLoading;
+    }
     persist();
   }
   useEffect(() => {
     let alive = true,
       resize: ResizeObserver | undefined,
+      operationObserver: ReturnType<typeof observeEditorOperations> | undefined,
+      geometryAdapter: ReturnType<typeof registerEditorGeometry> | undefined,
       colorPositioning: ReturnType<typeof createColorPickerPositioning> | undefined;
     (async () => {
       const grapes = (await import("grapesjs")).default;
@@ -710,14 +741,15 @@ export default function GrapesStudio() {
         },
       });
       editor.current = ed;
+      geometryAdapter = registerEditorGeometry(ed);
+      if (desktop?.logAppend) {
+        operationRecorder.current = createOperationRecorder(event => desktop!.logAppend(event), () => {
+          toast.error("操作日志记录失败", { description: "工程保存不受影响。请在应用与更新中查看日志状态。", duration: Infinity });
+        });
+        operationObserver = observeEditorOperations(ed, operationRecorder.current, () => canSave.current && !loadingProject.current);
+      }
       setInstance(ed);
       registerLibrary(ed);
-      // GrapesJS toolbar pointers are frame-relative but still screen-scaled.
-      ed.on(
-        "toolbar:run:before",
-        ({ event }: { event: { clientX: number; clientY: number } }) =>
-          normalizeToolbarPointer(event, ed.Canvas.getZoom()),
-      );
       const refresh = () => {
         setBlocks([...ed.BlockManager.getAll().models]);
         tick((v) => v + 1);
@@ -761,6 +793,7 @@ export default function GrapesStudio() {
         }
       });
       ed.on("load", async () => {
+        operationRecorder.current?.record({ event: "project.load.start", source: "editor" });
         try {
           const [savedFile, library, old] = await Promise.all([
             get("wireframe-studio-v2"),
@@ -817,13 +850,14 @@ export default function GrapesStudio() {
             );
           }
           canSave.current = true;
+          operationRecorder.current?.record({ event: "project.load", source: "editor", code: "OK" });
           if (desktop?.onControlRequest) {
             codexController.current?.dispose();
             codexController.current = createCodexController(ed, {
               getMeta: () => metaRef.current,
               setMeta: next => { metaRef.current = next; setMeta(next); },
               persist: flushProject,
-              canExecute: () => canSave.current && !ed.getEditing() &&
+              canExecute: () => canSave.current && !loadingProject.current && !ed.getEditing() &&
                 !document.querySelector('[role="dialog"]') &&
                 !document.activeElement?.matches('input,textarea,[contenteditable="true"]'),
             });
@@ -836,6 +870,7 @@ export default function GrapesStudio() {
           requestAnimationFrame(fit);
           desktop?.rendererReady(__WIREFRAME_UI_VERSION__);
         } catch (e) {
+          operationRecorder.current?.record({ event: "project.failed", source: "editor", code: "LOAD_FAILED" });
           setSaved("读取失败");
           toast.error("项目读取失败，未覆盖原有存储", {
             description: String(e),
@@ -860,6 +895,8 @@ export default function GrapesStudio() {
     return () => {
       alive = false;
       resize?.disconnect();
+      operationObserver?.dispose();
+      geometryAdapter?.destroy();
       canSave.current = false;
       codexController.current?.dispose();
       codexController.current = null;
@@ -881,11 +918,17 @@ export default function GrapesStudio() {
   }, [saved]);
   async function flushProject() {
     if (!editor.current || !canSave.current) return;
-    await set(
-      "wireframe-studio-v2",
-      studioFile(editor.current, metaRef.current),
-    );
-    setSaved("已存到本机");
+    if (loadingProject.current) throw Error("工程切换中，请等待载入完成");
+    const operationId = crypto.randomUUID();
+    operationRecorder.current?.record({ event: "project.save.start", source: "editor", operationId });
+    try {
+      await set("wireframe-studio-v2", studioFile(editor.current, metaRef.current));
+      setSaved("已存到本机");
+      operationRecorder.current?.record({ event: "project.save", source: "editor", operationId, code: "OK" });
+    } catch (error) {
+      operationRecorder.current?.record({ event: "project.failed", source: "editor", operationId, code: "SAVE_FAILED" });
+      throw error;
+    }
   }
   async function nativeOpen(file?: OpenedProject) {
     try {
@@ -913,7 +956,10 @@ export default function GrapesStudio() {
   const handleCommand = useEffectEvent((command: string) => {
     if (command === "close") {
       void flushProject()
-        .then(() => desktop!.closeReady())
+        .then(async () => {
+          await operationRecorder.current?.flush();
+          desktop!.closeReady();
+        })
         .catch((e) =>
           toast.error("无法关闭：工程尚未保存", { description: String(e) }),
         );
@@ -948,6 +994,9 @@ export default function GrapesStudio() {
       }
       catch { result = { ok: false, error: { code: "CONTROL_FAILED", message: "控制命令未完成，请先读取当前工程" }, applied: null, saved: false }; }
     }
+    const controlError = (result.error as { code?: string } | undefined)?.code;
+    operationRecorder.current?.record({ event: "control.outcome", source: "control", operationId: request.id,
+      code: result.ok ? "OK" : controlError === "REVISION_CONFLICT" ? "STALE_REVISION" : result.applied && !result.saved ? "PERSIST_FAILED" : "CONTROL_FAILED" });
     await desktop!.controlResult(request.id, result);
   });
   async function refreshControl() {
@@ -1053,15 +1102,21 @@ export default function GrapesStudio() {
       await flushProject();
       if (raw.format === "wireframe-studio") {
         const p = fixedCanvasFile(validateStudioFile(raw));
-        await editor.current!.loadProjectData(p.editor);
-        changeMeta(p.meta);
-        dimensions(p.meta.width, p.meta.height);
+        operationRecorder.current?.record({ event: "project.load.start", source: "editor" });
+        loadingProject.current = true;
+        try {
+          await editor.current!.loadProjectData(p.editor);
+          changeMeta(p.meta);
+          dimensions(p.meta.width, p.meta.height);
+          operationRecorder.current?.record({ event: "project.load", source: "editor", code: "OK" });
+        } finally { loadingProject.current = false; }
       } else loadWireframe(validateProject(raw));
       editor.current!.UndoManager.clear();
       persist();
       toast.success("项目已打开");
       return true;
     } catch (e) {
+      operationRecorder.current?.record({ event: "project.failed", source: "editor", code: "LOAD_FAILED" });
       toast.error("项目未打开", { description: String(e) });
       return false;
     }

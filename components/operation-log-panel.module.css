@@ -1,0 +1,13 @@
+.panel { border-top: 1px solid #dfe3e7; padding-top: 14px; min-width: 0; }
+.panel summary { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 14px; font-weight: 600; }
+.panel[open] .chevron { transform: rotate(90deg); }
+.toolbar { display: flex; align-items: center; gap: 6px; margin-top: 12px; }
+.toolbar span { flex: 1; font-size: 12px; min-width: 0; overflow-wrap: anywhere; }
+.toolbar button { width: 30px; height: 30px; display: grid; place-items: center; border: 1px solid #dfe3e7; border-radius: 4px; background: white; cursor: pointer; flex-shrink: 0; }
+.toolbar button:disabled { opacity: .5; cursor: default; }
+.session { font-size: 11px; color: #707781; overflow-wrap: anywhere; margin: 8px 0; }
+.list { max-height: 190px; overflow: auto; border-top: 1px solid #e8ebed; }
+.row { display: grid; grid-template-columns: 64px minmax(76px, 1fr) minmax(0, 1fr); column-gap: 8px; padding: 6px 0; border-bottom: 1px solid #eceef0; font-size: 11px; }
+.row code { overflow-wrap: anywhere; }
+.row time { color: #707781; }
+.geometry { grid-column: 1 / -1; color: #4c5964; padding-top: 3px; }

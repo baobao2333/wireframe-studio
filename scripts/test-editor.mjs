@@ -6,8 +6,8 @@ import formsModule from "grapesjs-plugin-forms";
 import {
   captureLibraryComponent,
   normalizeComponentStyle,
-  normalizeToolbarPointer,
 } from "../lib/component-snapshot.ts";
+import { normalizeToolbarPointer } from "../lib/editor-geometry.ts";
 import {
   exportHtml,
   studioFile,
@@ -285,6 +285,93 @@ try {
   );
 } finally {
   editor.destroy();
+}
+
+async function browserGeometrySetup(fixed) {
+  const { default: grapes } = await import("/node_modules/grapesjs/dist/grapes.mjs");
+  const { baseCanvasCss } = await import("/lib/editor-library.ts");
+  const { normalizeToolbarPointer } = await import("/lib/editor-geometry.ts");
+  const sheet = document.createElement("link");
+  sheet.rel = "stylesheet"; sheet.href = "/node_modules/grapesjs/dist/css/grapes.min.css";
+  document.head.append(sheet);
+  await new Promise(resolve => { sheet.onload = resolve; });
+  document.body.style.cssText = "margin:0;background:#eef1f4";
+  const host = document.createElement("div");
+  host.style.cssText = "position:absolute;left:80px;top:60px;width:1000px;height:700px";
+  document.body.append(host);
+  const ed = grapes.init({ container: host, height: "700px", storageManager: false, telemetry: false, cssIcons: "", panels: { defaults: [] }, avoidInlineStyle: true, dragMode: "absolute" });
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(Error("Geometry fixture load exceeded 15 seconds")), 15000);
+    ed.on("load", () => { clearTimeout(timer); resolve(); });
+  });
+  const events = [];
+  const pointerTrace = [];
+  let tracing = false;
+  ed.on("toolbar:run:before", ({ event }) => {
+    if (tracing) pointerTrace.push({ type: "toolbar-frame-screen", x: event.clientX, y: event.clientY, zoom: ed.Canvas.getZoom() });
+    if (!fixed) normalizeToolbarPointer(event, ed.Canvas.getZoom());
+  });
+  const tracePointer = event => {
+    if (!tracing) return;
+    const frame = ed.Canvas.getFrameEl().getBoundingClientRect();
+    const sample = { type: event.type, scope: event.currentTarget === document ? "outer" : "frame", target: event.target?.tagName,
+      x: event.clientX, y: event.clientY, buttons: event.buttons, trusted: event.isTrusted,
+      frame: { x: frame.x, y: frame.y, width: frame.width, height: frame.height } };
+    pointerTrace.push(sample);
+    queueMicrotask(() => {
+      const dragger = ed.Commands.get("core:component-drag").dragger;
+      if (dragger) Object.assign(sample, { startPointer: { ...dragger.startPointer }, currentPointer: { ...dragger.currentPointer }, startPosition: { ...dragger.startPosition }, position: { ...dragger.position } });
+    });
+  };
+  for (const doc of [document, ed.Canvas.getDocument()]) for (const type of ["mousedown", "mousemove", "mouseup"])
+    doc.addEventListener(type, tracePointer, true);
+  const registration = fixed ? (await import("/lib/editor-geometry.ts")).registerEditorGeometry(ed, event => events.push(event)) : null;
+  ed.on("toolbar:run:before", ({ event }) => {
+    if (tracing) pointerTrace.push({ type: "toolbar-normalized", x: event.clientX, y: event.clientY, zoom: ed.Canvas.getZoom() });
+  });
+  const records = [];
+  const observation = fixed ? (await import("/lib/editor-operation-log.ts")).observeEditorOperations(ed, { record: event => records.push(event) }, () => true) : null;
+  const settle = () => new Promise(resolve => setTimeout(resolve, 80));
+  let component;
+  const box = () => {
+    const el = component.getEl(), css = el.ownerDocument.defaultView.getComputedStyle(el), rect = el.getBoundingClientRect();
+    return { x: parseFloat(css.left), y: parseFloat(css.top), w: rect.width, h: rect.height, style: component.getStyle(), parent: component.parent().getId() };
+  };
+  const configure = async ({ zoom = 77, pan = { x: 24, y: 18 }, parent = { x: 110, y: 84, border: 3 } } = {}) => {
+    ed.setStyle(baseCanvasCss);
+    ed.getWrapper().addStyle({ width: "640px", height: "620px", position: "relative", overflow: "visible" });
+    ed.setComponents([{ attributes: { "data-fixture": "outer" }, style: { position: "absolute", left: `${parent.x}px`, top: `${parent.y}px`, width: "420px", height: "390px", border: `${parent.border}px solid #829399`, "background-color": "#e4eceb" }, components: [
+      { attributes: { "data-fixture": "target" }, resizable: true, style: { position: "absolute", left: "42px", top: "58px", width: "146px", height: "123px", border: "2px solid #166a59", "background-color": "#a4d5c6" } },
+    ] }]);
+    component = ed.getWrapper().find('[data-fixture="target"]')[0];
+    ed.Canvas.setZoom(zoom); ed.Canvas.setCoords(pan.x, pan.y);
+    ed.Canvas.getFrameEl().dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
+    ed.runCommand("core:component-select");
+    ed.select(component);
+    ed.Commands.get("core:component-select").initResize(component);
+    await new Promise(resolve => setTimeout(resolve, 400));
+    ed.UndoManager.clear();
+    const resizer = ed.Commands.get("resize").canvasResizer;
+    const handles = Object.fromEntries(Object.entries(resizer.handlers).map(([key, el]) => { const r = el.getBoundingClientRect(); return [key, { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }]; }));
+    const move = ed.Canvas.getToolbarEl().querySelector('[draggable="true"]')?.getBoundingClientRect();
+    return { before: box(), handles, move: move ? { x: Math.round(move.x + move.width / 2), y: Math.round(move.y + move.height / 2) } : null };
+  };
+  window.__geometryTest = { ed, events, records, box, configure, settle,
+    beginPointerTrace() { tracing = true; pointerTrace.length = 0; },
+    finishPointerTrace() { tracing = false; return [...pointerTrace]; },
+    async undo() { ed.UndoManager.undo(); await settle(); return box(); },
+    async redo() { ed.UndoManager.redo(); await settle(); return box(); },
+    async reload() { const data = JSON.parse(JSON.stringify(ed.getProjectData())); ed.getModel().setHovered(); ed.selectRemove(component); ed.stopCommand("resize"); await ed.loadProjectData(data); component = ed.getWrapper().find('[data-fixture="target"]')[0]; await new Promise(resolve => setTimeout(resolve, 400)); return box(); },
+    detachCheck() { observation?.dispose(); registration?.destroy(); const count = records.length;
+      ed.trigger("component:resize", { type: "start", component, el: component.getEl(), rect: { t: 0, l: 0, w: 100, h: 100 } });
+      ed.trigger("component:resize", { type: "end", component, el: component.getEl() });
+      ed.trigger("component:drag:start", { target: component }); ed.trigger("component:drag:end");
+      return { before: count, after: records.length };
+    },
+    async destroy() { for (const doc of [document, ed.Canvas.getDocument()]) for (const type of ["mousedown", "mousemove", "mouseup"]) doc?.removeEventListener(type, tracePointer, true);
+      observation?.dispose(); registration?.destroy(); ed.destroy(); host.remove(); sheet.remove(); delete window.__geometryTest; },
+  };
+  return configure();
 }
 
 async function browserSymbolChecks() {
@@ -659,19 +746,144 @@ if (process.versions.electron && process.env.WIREFRAME_SYMBOL_TEST_URL) {
   const { writeFile } = await import("node:fs/promises");
   const path = await import("node:path");
   const colors = process.env.WIREFRAME_EDITOR_CHECK === "colors";
+  const geometry = process.env.WIREFRAME_EDITOR_CHECK === "geometry";
   app.setName(colors ? "Wireframe Isolated Color Picker Check" : "Wireframe Isolated Symbol Check");
   app.setPath("userData", process.env.WIREFRAME_SYMBOL_TEST_DATA);
   try {
     await app.whenReady();
     console.log("Symbol browser check: Electron ready");
-    const window = new BrowserWindow({ show: false, width: colors ? 1360 : 900, height: colors ? 740 : 600, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, offscreen: colors } });
-    if (colors) window.webContents.setFrameRate(60);
+    const window = new BrowserWindow({ show: false, width: colors || geometry ? 1360 : 900, height: geometry ? 900 : colors ? 740 : 600, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, offscreen: colors || geometry } });
+    if (colors || geometry) window.webContents.setFrameRate(60);
     window.webContents.on("console-message", (details) => {
       if (details.level === "error" || details.message.startsWith("Symbol browser check:") || details.message.startsWith("Color picker check:")) console.log(details.message);
     });
     await window.loadURL(process.env.WIREFRAME_SYMBOL_TEST_URL);
     console.log("Symbol browser check: fixture page loaded");
     const dir = process.env.WIREFRAME_SYMBOL_TEST_ARTIFACTS;
+    if (geometry) {
+      const gesture = async (handle, dx, dy, cancel = false) => {
+        window.webContents.sendInputEvent({ type: "mouseMove", ...handle });
+        window.webContents.sendInputEvent({ type: "mouseDown", ...handle, button: "left", clickCount: 1 });
+        await window.webContents.executeJavaScript("window.__geometryTest.settle()");
+        if (dx || dy) {
+          for (let i = 1; i <= 3; i++) {
+            window.webContents.sendInputEvent({ type: "mouseMove", x: Math.round(handle.x + dx * i / 3), y: Math.round(handle.y + dy * i / 3), button: "left", modifiers: ["leftbuttondown"] });
+            await new Promise(resolve => setTimeout(resolve, 30));
+          }
+          await window.webContents.executeJavaScript("window.__geometryTest.settle()");
+        }
+        if (cancel) window.webContents.sendInputEvent({ type: "keyDown", keyCode: "ESC" });
+        window.webContents.sendInputEvent({ type: "mouseUp", x: handle.x + dx, y: handle.y + dy, button: "left", clickCount: 1 });
+        await window.webContents.executeJavaScript("window.__geometryTest.settle()");
+        return window.webContents.executeJavaScript("window.__geometryTest.box()");
+      };
+      const setup = await window.webContents.executeJavaScript(`(${browserGeometrySetup.toString()})(false)`);
+      const baseline = { ...setup, after: await gesture(setup.handles.br, 31, 23) };
+      await writeFile(path.join(dir, "geometry-baseline.json"), JSON.stringify(baseline, null, 2));
+      console.log(JSON.stringify({ status: "BASELINE", artifacts: dir, baseline }));
+      assert.ok(Math.abs(baseline.after.x - baseline.before.x) > 2 || Math.abs(baseline.after.y - baseline.before.y) > 2, "Uncorrected nested resize must reproduce coordinate displacement");
+      await window.webContents.executeJavaScript("window.__geometryTest.destroy()");
+      await window.webContents.executeJavaScript(`(${browserGeometrySetup.toString()})(true)`);
+      const same = (actual, expected, label) => {
+        for (const key of ["x", "y", "w", "h"]) assert.ok(Math.abs(actual[key] - expected[key]) < 0.05, `${label}: ${key} ${actual[key]} != ${expected[key]}`);
+      };
+      const fixed = [];
+      const smoke = process.env.WIREFRAME_GEOMETRY_SMOKE === "1";
+      for (const zoom of smoke ? [77] : [50, 77, 100, 150]) {
+        for (const parent of smoke ? [{ x: 110, y: 84, border: 7 }] : [{ x: 22, y: 30, border: 0 }, { x: 110, y: 84, border: 7 }]) {
+          for (const handle of smoke ? ["tl", "br"] : ["tl", "tc", "tr", "cl", "cr", "bl", "bc", "br"]) {
+            const configuration = { zoom, parent, pan: zoom === 150 ? { x: 260, y: 160 } : { x: -32, y: 44 } };
+            const setup = await window.webContents.executeJavaScript(`window.__geometryTest.configure(${JSON.stringify(configuration)})`);
+            const after = await gesture(setup.handles[handle], 30, 24);
+            const b = setup.before;
+            if (handle.includes("l")) assert.ok(Math.abs(after.x + after.w - b.x - b.w) < 0.05, `Right edge drift: ${zoom}/${handle}`);
+            else assert.equal(after.x, b.x, `Left edge drift: ${zoom}/${handle}`);
+            if (handle.includes("t")) assert.ok(Math.abs(after.y + after.h - b.y - b.h) < 0.05, `Bottom edge drift: ${zoom}/${handle}`);
+            else assert.equal(after.y, b.y, `Top edge drift: ${zoom}/${handle}`);
+            assert.equal(after.parent, b.parent);
+            assert.ok(after.w !== b.w || after.h !== b.h, `The pointer gesture must resize: ${zoom}/${handle}`);
+            const expectedWidth = b.w + (handle.includes("r") ? 30 : handle.includes("l") ? -30 : 0) / (zoom / 100);
+            const expectedHeight = b.h + (handle.includes("b") ? 24 : handle.includes("t") ? -24 : 0) / (zoom / 100);
+            assert.ok(Math.abs(after.w - expectedWidth) <= 1.1, `Resize width must match pointer travel at ${zoom}/${handle}`);
+            assert.ok(Math.abs(after.h - expectedHeight) <= 1.1, `Resize height must match pointer travel at ${zoom}/${handle}`);
+            if (["tc", "bc"].includes(handle)) assert.equal(after.w, b.w);
+            if (["cl", "cr"].includes(handle)) assert.equal(after.h, b.h);
+            same(await window.webContents.executeJavaScript("window.__geometryTest.undo()"), b, `One undo ${zoom}/${handle}`);
+            assert.equal(await window.webContents.executeJavaScript("window.__geometryTest.ed.UndoManager.hasUndo()"), false, "A resize must be one undo group");
+            same(await window.webContents.executeJavaScript("window.__geometryTest.redo()"), after, `One redo ${zoom}/${handle}`);
+            fixed.push({ ...configuration, handle, before: b, after });
+          }
+        }
+      }
+      const noMoveSetup = await window.webContents.executeJavaScript("window.__geometryTest.configure()");
+      same(await gesture(noMoveSetup.handles.br, 0, 0), noMoveSetup.before, "No pointer movement");
+      assert.equal(await window.webContents.executeJavaScript("window.__geometryTest.ed.UndoManager.hasUndo()"), false);
+      const cancelled = await gesture(noMoveSetup.handles.tl, 30, 24, true);
+      same(cancelled, noMoveSetup.before, "Escape restores resize geometry");
+      same(await window.webContents.executeJavaScript("window.__geometryTest.undo()"), noMoveSetup.before, "Undo after Escape must not restore an intermediate resize");
+      same(await window.webContents.executeJavaScript("window.__geometryTest.redo()"), noMoveSetup.before, "Redo after Escape must not restore an intermediate resize");
+      const drags = [];
+      for (const zoom of [50, 77, 100, 150]) {
+        const setup = await window.webContents.executeJavaScript(`window.__geometryTest.configure({zoom:${zoom},pan:{x:260,y:160}})`);
+        assert.ok(setup.move, "The native move toolbar must render");
+        await window.webContents.executeJavaScript("window.__geometryTest.beginPointerTrace()");
+        const after = await gesture(setup.move, 45, 30);
+        const pointerTrace = await window.webContents.executeJavaScript("window.__geometryTest.finishPointerTrace()");
+        await writeFile(path.join(dir, `drag-${zoom}-pointer-trace.json`), JSON.stringify({ zoom, setup, after, pointerTrace }, null, 2));
+        assert.equal(after.w, setup.before.w); assert.equal(after.h, setup.before.h);
+        assert.ok(Math.abs(after.x - setup.before.x - 45 / (zoom / 100)) <= 1.1, `Drag X must remain local at ${zoom}%: ${JSON.stringify(after)}`);
+        assert.ok(Math.abs(after.y - setup.before.y - 30 / (zoom / 100)) <= 1.1, `Drag Y must remain local at ${zoom}%`);
+        assert.equal(after.parent, setup.before.parent);
+        same(await window.webContents.executeJavaScript("window.__geometryTest.undo()"), setup.before, `Drag undo ${zoom}`);
+        same(await window.webContents.executeJavaScript("window.__geometryTest.redo()"), after, `Drag redo ${zoom}`);
+        drags.push({ zoom, before: setup.before, after });
+      }
+      const bodySetup = await window.webContents.executeJavaScript("window.__geometryTest.configure({zoom:77,pan:{x:24,y:18}})");
+      const bodyPointer = { x: Math.round((bodySetup.handles.tl.x + bodySetup.handles.br.x) / 2), y: Math.round((bodySetup.handles.tl.y + bodySetup.handles.br.y) / 2) };
+      await window.webContents.executeJavaScript("window.__geometryTest.beginPointerTrace()");
+      const bodyAfter = await gesture(bodyPointer, 46, 31);
+      const bodyTrace = await window.webContents.executeJavaScript("window.__geometryTest.finishPointerTrace()");
+      await writeFile(path.join(dir, "body-drag-pointer-trace.json"), JSON.stringify({ setup: bodySetup, after: bodyAfter, pointerTrace: bodyTrace }, null, 2));
+      assert.ok(bodyTrace.some(event => event.type === "mousedown" && event.scope === "frame" && event.buttons === 1), "The direct drag must start with a held-button event inside the iframe");
+      assert.ok(!bodyTrace.some(event => event.type.startsWith("toolbar-")), "The direct drag must not use toolbar normalization");
+      assert.equal(bodyAfter.w, bodySetup.before.w); assert.equal(bodyAfter.h, bodySetup.before.h);
+      assert.ok(Math.abs(bodyAfter.x - bodySetup.before.x - 46 / 0.77) <= 1.1, "Direct component drag X must remain local");
+      assert.ok(Math.abs(bodyAfter.y - bodySetup.before.y - 31 / 0.77) <= 1.1, "Direct component drag Y must remain local");
+      same(await window.webContents.executeJavaScript("window.__geometryTest.undo()"), bodySetup.before, "Direct component drag undo");
+      same(await window.webContents.executeJavaScript("window.__geometryTest.redo()"), bodyAfter, "Direct component drag redo");
+      const savedSetup = await window.webContents.executeJavaScript("window.__geometryTest.configure({zoom:77})");
+      const saved = await gesture(savedSetup.handles.tl, -30, -24);
+      window.webContents.sendInputEvent({ type: "mouseMove", x: 4, y: 4 });
+      await window.webContents.executeJavaScript("window.__geometryTest.settle()");
+      same(await window.webContents.executeJavaScript("window.__geometryTest.reload()"), saved, "Save and reopen retains corrected geometry");
+      const operations = await window.webContents.executeJavaScript("window.__geometryTest.events");
+      assert.equal(operations.filter(op => op.phase === "start").length, fixed.length + 3);
+      assert.equal(operations.filter(op => op.phase === "end").length, fixed.length + 3);
+      assert.equal(operations.filter(op => op.cancelled).length, 1);
+      const records = await window.webContents.executeJavaScript("window.__geometryTest.records");
+      const resizeStarts = records.filter(record => record.event === "component.resize.start");
+      const resizeEnds = records.filter(record => ["component.resize.end", "component.resize.cancel"].includes(record.event));
+      assert.equal(resizeStarts.length, fixed.length + 3); assert.equal(resizeEnds.length, fixed.length + 3);
+      assert.equal(resizeEnds.filter(record => record.event === "component.resize.cancel").length, 1);
+      const dpr = await window.webContents.executeJavaScript("window.devicePixelRatio");
+      const operationEnds = operations.filter(op => op.phase === "end");
+      for (const [index, start] of resizeStarts.entries()) {
+        const end = resizeEnds.find(record => record.operationId === start.operationId);
+        assert.ok(end, "Each resize start must have one correlated terminal record");
+        assert.deepEqual(start.before, operationEnds[index].before);
+        assert.deepEqual(end.after, operationEnds[index].after);
+        assert.equal(start.viewport.zoom, operationEnds[index].zoom);
+        assert.equal(start.viewport.devicePixelRatio, dpr);
+        assert.equal(start.handle, operationEnds[index].handle);
+      }
+      const detached = await window.webContents.executeJavaScript("window.__geometryTest.detachCheck()");
+      assert.equal(detached.after, detached.before, "Disposed observers must no longer record gestures");
+      await writeFile(path.join(dir, "geometry-fixed.json"), JSON.stringify({ fixed, drags, bodyDrag: { before: bodySetup.before, after: bodyAfter }, noMove: noMoveSetup.before, cancelled, saved, operations, records, detached }, null, 2));
+      await writeFile(path.join(dir, "geometry-fixed.png"), (await window.webContents.capturePage()).toPNG());
+      await window.webContents.executeJavaScript("window.__geometryTest.destroy()");
+      console.log(JSON.stringify({ status: "PASS", cases: fixed.length, zoom: [...new Set(fixed.map(item => item.zoom))], eightHandles: !smoke, nestedBordersAndPan: true, oneUndoRedo: true, noMovement: true, escape: true, saveReopen: true, realToolbarDrags: drags.map(item => item.zoom), directComponentDrag: true, framePacedHeldPointer: true, sizeMatchesPointer: true, logGeometryAndCancellation: true, disposedObserver: true, artifacts: dir, isolatedUserData: true, visibleWindows: 0 }));
+      window.destroy(); app.exit(0); return;
+    }
     if (colors) {
       const baseline = await window.webContents.executeJavaScript(`(${browserColorPickerSetup.toString()})(false)`);
       await writeFile(path.join(dir, "color-picker-baseline.png"), (await window.webContents.capturePage()).toPNG());
@@ -714,7 +926,7 @@ if (process.versions.electron && process.env.WIREFRAME_SYMBOL_TEST_URL) {
     app.exit(0);
   } catch (error) { console.error(error); app.exit(1); }
   })().catch(error => { console.error(error); app.exit(1); });
-} else if (process.argv.includes("--browser") || process.argv.includes("--color-picker")) {
+} else if (process.argv.includes("--browser") || process.argv.includes("--color-picker") || process.argv.includes("--geometry")) {
   const { createServer } = await import("vite");
   const { spawn } = await import("node:child_process");
   const { mkdir, mkdtemp, rm } = await import("node:fs/promises");
@@ -726,7 +938,8 @@ if (process.versions.electron && process.env.WIREFRAME_SYMBOL_TEST_URL) {
   const data = await mkdtemp(path.join(tmpdir(), prefix));
   await mkdir(path.join(root, "work"), { recursive: true });
   const colors = process.argv.includes("--color-picker");
-  const artifacts = await mkdtemp(path.join(root, "work", colors ? "color-picker-check-" : "symbol-export-"));
+  const geometry = process.argv.includes("--geometry");
+  const artifacts = await mkdtemp(path.join(root, "work", geometry ? "geometry-check-" : colors ? "color-picker-check-" : "symbol-export-"));
   const server = await createServer({ configFile: false, root, publicDir: false, appType: "custom", logLevel: "warn", optimizeDeps: { noDiscovery: true, include: ["fflate", "html-to-image"] }, server: { host: "127.0.0.1", port: 0, watch: null } });
   server.middlewares.use((request, response, next) => {
     if (request.url !== "/__symbol_check.html") return next();
@@ -736,7 +949,7 @@ if (process.versions.electron && process.env.WIREFRAME_SYMBOL_TEST_URL) {
   try {
     await server.listen();
     const electron = (await import("electron")).default;
-    const env = { ...process.env, WIREFRAME_EDITOR_CHECK: colors ? "colors" : "symbols", WIREFRAME_SYMBOL_TEST_DATA: data, WIREFRAME_SYMBOL_TEST_ARTIFACTS: artifacts, WIREFRAME_SYMBOL_TEST_URL: `${server.resolvedUrls.local[0]}__symbol_check.html` };
+    const env = { ...process.env, WIREFRAME_EDITOR_CHECK: geometry ? "geometry" : colors ? "colors" : "symbols", WIREFRAME_SYMBOL_TEST_DATA: data, WIREFRAME_SYMBOL_TEST_ARTIFACTS: artifacts, WIREFRAME_SYMBOL_TEST_URL: `${server.resolvedUrls.local[0]}__symbol_check.html` };
     delete env.ELECTRON_RUN_AS_NODE;
     await new Promise((resolve, reject) => {
       const child = spawn(electron, [fileURLToPath(import.meta.url)], { cwd: root, env, stdio: "inherit", windowsHide: true });
